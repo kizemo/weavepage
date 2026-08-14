@@ -697,12 +697,16 @@ ${sh.styles}
     open: async () => {},
     new: () => {},
     close: () => {},
+    togglePreview: () => {},
   });
   refs.current.save = saveFile;
   refs.current.saveAs = saveAsFile;
   refs.current.open = openFile;
   refs.current.new = newDoc;
   refs.current.close = () => closeDoc(activeId);
+  refs.current.togglePreview = () => {
+    if (activeDoc.kind === "html") changeMode(mode === "preview" ? "edit" : "preview");
+  };
 
   // 刷新预览：把当前编辑器内容注入原始 HTML 的 body 替换，重载 iframe
   const refreshPreview = useCallback(() => {
@@ -751,6 +755,10 @@ ${sh.styles}
       if (e.key === "F5") {
         e.preventDefault();
         refreshPreview();
+      }
+      if (e.key === "F9") {
+        e.preventDefault();
+        refs.current.togglePreview();
       }
     };
     window.addEventListener("keydown", handler);

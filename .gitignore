@@ -27,3 +27,4 @@ release/
 *.sln
 *.sw?
 handoff-*.md
+prompt-*.md
