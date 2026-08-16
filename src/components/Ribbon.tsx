@@ -18,6 +18,10 @@ interface RibbonProps {
   onInsertTable: (rows: number, cols: number) => void;
   onDeleteTable: () => void;
   onLink: () => void;
+  // 最近颜色(RibbonHome 用),App 层记录用色
+  recentTextColors: string[];
+  recentHighlightColors: string[];
+  onColorUsed: (kind: "text" | "highlight", color: string) => void;
 }
 
 export function Ribbon(props: RibbonProps) {
@@ -33,7 +37,13 @@ export function Ribbon(props: RibbonProps) {
         />
         <div className={`ribbon-tab-content ${props.disabled ? "disabled" : ""}`}>
           {props.activeTab === "edit" ? (
-            <RibbonHome editor={props.editor} onLink={props.onLink} />
+            <RibbonHome
+              editor={props.editor}
+              onLink={props.onLink}
+              recentTextColors={props.recentTextColors}
+              recentHighlightColors={props.recentHighlightColors}
+              onColorUsed={props.onColorUsed}
+            />
           ) : (
             <RibbonInsert
               editor={props.editor}

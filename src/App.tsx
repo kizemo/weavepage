@@ -104,8 +104,6 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
   const [recentColors, setRecentColors] = useState<RecentColorsResult>({ text: [], highlight: [] });
-  // recentColors 暂未接线 Task 8(Ribbon 接入),此处先 void 防止 TS noUnusedLocals
-  void recentColors;
 
   // ---- 启动加载最近文件 / 最近颜色 ----
   useEffect(() => {
@@ -546,8 +544,6 @@ ${sh.styles}
     },
     []
   );
-  // onColorUsed 暂未接线 Task 8
-  void onColorUsed;
 
   // ---- 从源码（完整文档）解析：同步编辑器内容与外壳 ----
   const syncFromSource = useCallback(
@@ -906,6 +902,9 @@ ${sh.styles}
         onInsertTable={insertTable}
         onDeleteTable={deleteTable}
         onLink={setLink}
+        recentTextColors={recentColors.text}
+        recentHighlightColors={recentColors.highlight}
+        onColorUsed={onColorUsed}
       />
 
       {/* 主区域：侧边栏 + 内容 */}

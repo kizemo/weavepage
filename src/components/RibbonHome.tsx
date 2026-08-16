@@ -3,12 +3,16 @@ import type { Editor } from "@tiptap/react";
 import { useEditorState } from "@tiptap/react";
 import "@tiptap/extension-highlight";
 import "@tiptap/extension-text-align";
-import { GroupTitle, RibbonButton, SelectControl, ColorControl } from "./controls";
+import { GroupTitle, RibbonButton, SelectControl } from "./controls";
+import { ColorPicker } from "./ColorPicker";
 import { FONT_FAMILIES, FONT_SIZES, TEXT_COLORS, HIGHLIGHT_COLORS } from "../utils/fonts";
 
 interface RibbonHomeProps {
   editor: Editor;
   onLink: () => void;
+  recentTextColors: string[];
+  recentHighlightColors: string[];
+  onColorUsed: (kind: "text" | "highlight", color: string) => void;
 }
 
 // px 转 pt（1pt = 4/3px），用于把计算样式字号映射到字号下拉的 pt 体系
@@ -18,7 +22,7 @@ const pxToPt = (px: string): string => {
   return `${Math.round(v * 0.75 * 2) / 2}pt`;
 };
 
-export function RibbonHome({ editor, onLink }: RibbonHomeProps) {
+export function RibbonHome({ editor, onLink, recentTextColors, recentHighlightColors, onColorUsed }: RibbonHomeProps) {
   // 选区/文档每次变化都重新派生格式状态，选中文字时功能区实时显示其格式
   const fmt = useEditorState({
     editor,
@@ -172,18 +176,20 @@ export function RibbonHome({ editor, onLink }: RibbonHomeProps) {
           onClick={() => editor.chain().focus().toggleStrike().run()}
           active={fmt.strike}
         />
-        <ColorControl
+        <ColorPicker
           value={fmt.textColor}
-          onChange={setColor}
+          onChange={(c) => { setColor(c); onColorUsed("text", c); }}
           onClear={clearColor}
           colors={TEXT_COLORS}
+          recents={recentTextColors}
           title="文字颜色"
         />
-        <ColorControl
+        <ColorPicker
           value={fmt.highlightColor}
-          onChange={setHighlight}
+          onChange={(c) => { setHighlight(c); onColorUsed("highlight", c); }}
           onClear={clearHighlight}
           colors={HIGHLIGHT_COLORS}
+          recents={recentHighlightColors}
           title="高亮"
         />
       </div>
