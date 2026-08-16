@@ -29,6 +29,12 @@ import { BlockSourcePanel } from "./components/BlockSourcePanel";
 import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
 import { formatHtml } from "./utils/formatHtml";
+import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
+import { loadRecentColors, pushRecentColor } from "./utils/recentColors";
+import type { ColorKind, RecentColorsResult } from "./utils/recentColors";
+// 临时引用占位,真实消费者见 MenuBar/Ribbon 接线(Task 5/6/8 接入后删除)
+void clearRecent; void pushRecentColor;
+const _kind: ColorKind = "text"; void _kind;
 import "./App.css";
 
 const THEME_KEY = "tiptap-theme";
@@ -99,6 +105,18 @@ function App() {
   const [activeTab, setActiveTab] = useState<RibbonTab>("edit");
   const [wordCount, setWordCount] = useState(0);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [recentPaths, setRecentPaths] = useState<string[]>([]);
+  const [recentColors, setRecentColors] = useState<RecentColorsResult>({ text: [], highlight: [] });
+  // 临时占位,MenuBar/Ribbon 接入后删除
+  void recentPaths; void recentColors;
+
+  // ---- 启动加载最近文件 / 最近颜色 ----
+  useEffect(() => {
+    loadRecent().then(setRecentPaths).catch((e) => console.warn("loadRecent 失败:", e));
+    loadRecentColors()
+      .then(setRecentColors)
+      .catch((e) => console.warn("loadRecentColors 失败:", e));
+  }, []);
 
   const activeDoc = docs.find((d) => d.id === activeId) ?? docs[0];
 
@@ -453,6 +471,7 @@ ${sh.styles}
       setDocs([...updated, doc]);
       setActiveId(doc.id);
       applyDoc(doc);
+      pushRecent(path).then(setRecentPaths).catch((e) => console.warn("pushRecent 失败:", e));
     } catch (e) {
       console.error("打开文件失败:", e);
       window.alert("打开文件失败：" + String(e));
@@ -469,6 +488,9 @@ ${sh.styles}
         setDocs([...updated, doc]);
         setActiveId(doc.id);
         applyDoc(doc);
+        pushRecent(res.path)
+          .then(setRecentPaths)
+          .catch((e) => console.warn("pushRecent 失败:", e));
       } catch (e) {
         console.error("打开资源失败:", e);
         window.alert("打开资源失败：" + String(e));
@@ -529,6 +551,12 @@ ${sh.styles}
       setFilePath(path);
       setIsModified(false);
       updateActiveDoc({ filePath: path, isModified: false });
+      // 保存到新路径时记入最近列表(同路径不重 push)
+      if (path !== filePath) {
+        pushRecent(path)
+          .then(setRecentPaths)
+          .catch((e) => console.warn("pushRecent 失败:", e));
+      }
       // 源码模式保存后：解析源码同步编辑器内容与外壳（失败不影响已完成的保存）
       if (doc.kind === "html" && mode === "source") {
         try {
