@@ -409,6 +409,31 @@ ${sh.styles}
     [filePath]
   );
 
+  // ---- 按路径读文件并构造 DocState(openFile/openResource/openRecent 共用) ----
+  const loadDocFromPath = useCallback(
+    async (path: string): Promise<DocState> => {
+      const raw = await readTextFile(path);
+      const ext = (path.split(".").pop() ?? "").toLowerCase();
+      const isHtml = ext === "html" || ext === "htm";
+      const id = idRef.current++;
+      if (isHtml) {
+        const parsed = await parseShell(raw, path);
+        return {
+          id, kind: "html", filePath: path, isModified: false,
+          body: parsed.bodyHtml, sourceText: "", mode: "edit",
+          shell: parsed.shell, rawFullDoc: parsed.fullDoc,
+          resources: parsed.resources,
+        };
+      }
+      return {
+        id, kind: "text", filePath: path, isModified: false,
+        body: raw, sourceText: "", mode: "edit",
+        shell: null, rawFullDoc: null, resources: [],
+      };
+    },
+    [parseShell]
+  );
+
   // ---- 打开文件（新标签） ----
   const openFile = useCallback(async () => {
     if (!editor) return;
@@ -423,58 +448,33 @@ ${sh.styles}
       });
       if (!selected) return;
       const path = selected as string;
-      const raw = await readTextFile(path);
-      const ext = (path.split(".").pop() ?? "").toLowerCase();
-      const isHtml = ext === "html" || ext === "htm";
       const updated = snapshotActive();
-      const id = idRef.current++;
-      let doc: DocState;
-      if (isHtml) {
-        const parsed = await parseShell(raw, path);
-        doc = {
-          id, kind: "html", filePath: path, isModified: false,
-          body: parsed.bodyHtml, sourceText: "", mode: "edit",
-          shell: parsed.shell, rawFullDoc: parsed.fullDoc,
-          resources: parsed.resources,
-        };
-      } else {
-        doc = {
-          id, kind: "text", filePath: path, isModified: false,
-          body: raw, sourceText: "", mode: "edit",
-          shell: null, rawFullDoc: null, resources: [],
-        };
-      }
+      const doc = await loadDocFromPath(path);
       setDocs([...updated, doc]);
-      setActiveId(id);
+      setActiveId(doc.id);
       applyDoc(doc);
     } catch (e) {
       console.error("打开文件失败:", e);
       window.alert("打开文件失败：" + String(e));
     }
-  }, [editor, snapshotActive, parseShell, applyDoc]);
+  }, [editor, snapshotActive, loadDocFromPath, applyDoc]);
 
   // ---- 打开外联资源（侧边栏点击，新标签） ----
   const openResource = useCallback(
     async (res: ResourceRef) => {
       if (!editor) return;
       try {
-        const raw = await readTextFile(res.path);
         const updated = snapshotActive();
-        const id = idRef.current++;
-        const doc: DocState = {
-          id, kind: "text", filePath: res.path, isModified: false,
-          body: raw, sourceText: "", mode: "edit",
-          shell: null, rawFullDoc: null, resources: [],
-        };
+        const doc = await loadDocFromPath(res.path);
         setDocs([...updated, doc]);
-        setActiveId(id);
+        setActiveId(doc.id);
         applyDoc(doc);
       } catch (e) {
         console.error("打开资源失败:", e);
         window.alert("打开资源失败：" + String(e));
       }
     },
-    [editor, snapshotActive, applyDoc]
+    [editor, snapshotActive, loadDocFromPath, applyDoc]
   );
 
   // ---- 从源码（完整文档）解析：同步编辑器内容与外壳 ----
