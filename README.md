@@ -43,6 +43,8 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 - **Word 风格功能区**：字体、字号（9-36pt）、颜色、高亮、对齐、列表、引用、代码块
 - 选中文字时，功能区**自动显示该文字的实际字体 / 字号 / 颜色**
+- **文字颜色 / 高亮**：弹出色板集成「更多颜色」（系统色盘）+「最近使用」色组（各 8 个，自动 LRU）
+- **打开最近**：文件菜单「打开最近 ▶」二级菜单，默认保存最近 10 个工作文档，子菜单尾部一键清除
 - **表格**：5×5 网格选择器一键插入，行列增删
 - **图片**：本地图片以 base64 嵌入，所见即所得
 
@@ -71,18 +73,32 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ## 🚀 安装
 
-1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_0.1.0_x64-setup.exe`
+1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_0.1.2_x64-setup.exe`
 2. 双击安装（自动安装 WebView2 运行时，全程无需联网）
 3. 从开始菜单启动 **WeavePage**
 
 > **系统要求**：Windows 10/11 x64
+
+### 🔐 校验
+
+```
+# NSIS 安装包 (~208 MB)
+sha256: 447313ac7a3f5fd5f0d61c69e97b56775dec81f618a7d575049dd6f491988555
+
+# MSI 安装包 (~206 MB)
+sha256: 4fc0170eb3928dbf48b42cefb4a8f74951026f40abe1023435a6c3f800f84b15
+```
+
+Windows 验证：`certutil -hashfile WeavePage_0.1.2_x64-setup.exe SHA256`
 
 ## 📖 使用指南
 
 | 你想做什么 | 怎么做 |
 |---|---|
 | 打开网页 | `文件 → 打开`（Ctrl+O）选择 HTML 文件，自动进入编辑视图 |
+| 快速重开最近文档 | `文件 → 打开最近 ▶`（自动保存 10 个,一级子菜单带「清除」） |
 | 编辑内容 | 直接在编辑区输入，用功能区调整格式，所见即所得 |
+| 自定义文字/高亮颜色 | 功能区「文字颜色」/「高亮」弹窗 → 「更多颜色...」系统色盘；常用色自动入「最近使用」 |
 | 查看真实效果 | 功能区「👁 网页预览」（或 F9），可直接在预览中改文字 |
 | 同步编辑到预览 | 预览中按 **F5** 刷新 |
 | 编辑整页源码 | `视图 → 源码视图`，head / CSS / JS 全部可改，Ctrl+S 保存 |
@@ -130,6 +146,21 @@ pnpm release        # 打包安装程序到 release/ 目录
 
 - 遇到问题或有功能建议，欢迎在 [Issues](https://github.com/kizemo/weavepage/issues) 提出
 - 演示文档见 [`assets/demo/demo.html`](assets/demo/demo.html)，下载后可直接用 WeavePage 打开体验
+
+## 📋 变更日志
+
+### v0.1.2 — 2026-08-16
+- 新增 文件菜单「打开最近 ▶」二级子菜单，默认保存最近 10 个工作文档，附「清除」按钮
+- 新增 文字颜色 / 高亮弹出集成「更多颜色...」原生系统色盘(WebView2)
+- 新增 「最近使用」色组，自动保留最近 8 个文字色 + 8 个高亮色（LRU，hex 归一化）
+- 数据持久化于 `%APPDATA%\fun.aiec.weavepage\`（`recent.json` + `recent-colors.json`）
+- 重构 提取 `loadDocFromPath` 共用 `openFile` / `openResource` / `打开最近` 三处读取逻辑
+
+### v0.1.1 — 2026-08-15
+- 更换 织纹 W 品牌应用图标（窗口 / 安装包 / 任务栏）
+
+### v0.1.0 — 2026-08-14
+- 发布 初版：所见即所得 + Word 功能区 + 多标签 + 预览/源码/块编辑 + 外联资源侧边栏
 
 ## 许可
 
