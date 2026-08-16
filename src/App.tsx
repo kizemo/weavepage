@@ -32,9 +32,6 @@ import { formatHtml } from "./utils/formatHtml";
 import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
 import { loadRecentColors, pushRecentColor } from "./utils/recentColors";
 import type { ColorKind, RecentColorsResult } from "./utils/recentColors";
-// 临时引用占位,真实消费者见 MenuBar/Ribbon 接线(Task 5/6/8 接入后删除)
-void clearRecent; void pushRecentColor;
-const _kind: ColorKind = "text"; void _kind;
 import "./App.css";
 
 const THEME_KEY = "tiptap-theme";
@@ -107,8 +104,8 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
   const [recentColors, setRecentColors] = useState<RecentColorsResult>({ text: [], highlight: [] });
-  // 临时占位,MenuBar/Ribbon 接入后删除
-  void recentPaths; void recentColors;
+  // recentColors 暂未接线 Task 8(Ribbon 接入),此处先 void 防止 TS noUnusedLocals
+  void recentColors;
 
   // ---- 启动加载最近文件 / 最近颜色 ----
   useEffect(() => {
@@ -499,6 +496,59 @@ ${sh.styles}
     [editor, snapshotActive, loadDocFromPath, applyDoc]
   );
 
+  // ---- 打开最近文件（菜单子项）,文件丢失时询问是否从列表移除 ----
+  const openRecent = useCallback(
+    async (path: string) => {
+      if (!editor) return;
+      try {
+        const updated = snapshotActive();
+        const doc = await loadDocFromPath(path);
+        setDocs([...updated, doc]);
+        setActiveId(doc.id);
+        applyDoc(doc);
+        const next = await pushRecent(path);
+        setRecentPaths(next);
+      } catch (e) {
+        console.error("打开最近文件失败:", e);
+        const remove = window.confirm(`无法打开 ${path}\n\n是否从最近列表中移除?`);
+        if (remove) {
+          try {
+            const next = await clearRecent();
+            setRecentPaths(next);
+          } catch (err) {
+            console.warn("clearRecent 失败:", err);
+          }
+        }
+      }
+    },
+    [editor, snapshotActive, loadDocFromPath, applyDoc]
+  );
+
+  // ---- 清除最近文件列表 ----
+  const handleClearRecent = useCallback(async () => {
+    try {
+      const next = await clearRecent();
+      setRecentPaths(next);
+    } catch (e) {
+      console.warn("clearRecent 失败:", e);
+    }
+  }, []);
+
+  // ---- 记录用户用色(text/highlight)到最近颜色 store ----
+  const onColorUsed = useCallback(
+    async (kind: ColorKind, color: string) => {
+      try {
+        const next = await pushRecentColor(kind, color);
+        setRecentColors(next);
+      } catch (e) {
+        console.warn("pushRecentColor 失败:", e);
+      }
+    },
+    []
+  );
+  // onColorUsed 暂未接线 Task 8
+  void onColorUsed;
+
   // ---- 从源码（完整文档）解析：同步编辑器内容与外壳 ----
   const syncFromSource = useCallback(
     (fullHtml: string, markModified: boolean) => {
@@ -826,6 +876,9 @@ ${sh.styles}
         onSaveAs={saveAsFile}
         onExportPage={exportPage}
         onClose={() => closeDoc(activeId)}
+        recent={recentPaths}
+        onOpenRecent={openRecent}
+        onClearRecent={handleClearRecent}
         mode={mode}
         onModeChange={changeMode}
         viewMode={viewMode}
