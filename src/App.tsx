@@ -41,6 +41,7 @@ import {
   compareVersions,
   APP_DOWNLOAD_URL,
 } from "./utils/updateCheck";
+import { startInAppUpgrade } from "./utils/inAppUpdater";
 import {
   applyLineHeight,
   applyParagraphSpacing,
@@ -163,16 +164,37 @@ function App() {
         setStartupPromptShown(true);
         try {
           const yes = await ask(
-            `发现新版本 v${remote.version}（当前 v${current}）\n\n${remote.notes ?? ""}`,
+            `发现新版本 v${remote.version}（当前 v${current}）\n\n${remote.notes ?? ""}\n\n点「立即升级」会下载到本地 Downloads 并启动安装程序,本应用需手动关闭后再装。`,
             {
               title: "WeavePage 有新版本",
               kind: "info",
-              okLabel: "去下载",
+              okLabel: "立即升级",
               cancelLabel: "稍后",
             }
           );
           if (yes && mounted) {
-            await openUrl(APP_DOWNLOAD_URL);
+            // 优先用 version.json 里精确指向的 installer URL(走 ?file= 直接 serve)
+            // 兜底用 APP_DOWNLOAD_URL(它也直接 serve 了,见 v0.1.5 hotfix)
+            const downloadUrl = remote.url || APP_DOWNLOAD_URL;
+            // 从 URL 末段拿文件名,失败回退恒定
+            const filename = (() => {
+              try {
+                const u = new URL(downloadUrl);
+                const fromPath = u.pathname.split("/").pop() || "";
+                if (fromPath.endsWith(".exe")) return fromPath;
+                const fromQuery = u.searchParams.get("file") || "";
+                if (fromQuery.endsWith(".exe")) return fromQuery;
+              } catch {
+                /* 不致命 */
+              }
+              return `WeavePage-${remote.version}_x64-setup.exe`;
+            })();
+            try {
+              await startInAppUpgrade(downloadUrl, filename);
+            } catch (e) {
+              console.warn("in-app upgrade 失败,回退到打开浏览器:", e);
+              await openUrl(APP_DOWNLOAD_URL);
+            }
           }
         } catch (e) {
           console.warn("启动更新弹窗失败:", e);
