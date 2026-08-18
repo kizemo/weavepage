@@ -213,6 +213,7 @@ export function RibbonHome({
           colors={PAGE_BG_COLORS}
           recents={[]}
           title="页面背景"
+          label="背景"
         />
       </div>
 
@@ -285,24 +286,33 @@ export function RibbonHome({
           onClick={() => editor.chain().focus().toggleCodeBlock().run()}
           active={fmt.codeBlock}
         />
-        <SelectControl
-          value={fmt.lineHeight === "" ? "" : String(fmt.lineHeight)}
-          onChange={handleLineHeight}
-          options={LINE_HEIGHT_OPTIONS}
-          title="行距"
-        />
-        <SelectControl
-          value={fmt.marginTop === "" ? "" : `${fmt.marginTop}pt`}
-          onChange={handleMarginTop}
-          options={PARAGRAPH_SPACING_OPTIONS}
-          title="段前(pt)"
-        />
-        <SelectControl
-          value={fmt.marginBottom === "" ? "" : `${fmt.marginBottom}pt`}
-          onChange={handleMarginBottom}
-          options={PARAGRAPH_SPACING_OPTIONS}
-          title="段后(pt)"
-        />
+        <span className="ribbon-select-with-hint" title="行间距(行高倍数)">
+          <SelectControl
+            value={fmt.lineHeight === "" ? "" : String(fmt.lineHeight)}
+            onChange={handleLineHeight}
+            options={LINE_HEIGHT_OPTIONS}
+            title="行距"
+          />
+          <span className="ribbon-hint">行距</span>
+        </span>
+        <span className="ribbon-select-with-hint" title="段前空白(pt 单位)">
+          <SelectControl
+            value={fmt.marginTop === "" ? "" : `${fmt.marginTop}pt`}
+            onChange={handleMarginTop}
+            options={PARAGRAPH_SPACING_OPTIONS}
+            title="段前(pt)"
+          />
+          <span className="ribbon-hint">段前</span>
+        </span>
+        <span className="ribbon-select-with-hint" title="段后空白(pt 单位)">
+          <SelectControl
+            value={fmt.marginBottom === "" ? "" : `${fmt.marginBottom}pt`}
+            onChange={handleMarginBottom}
+            options={PARAGRAPH_SPACING_OPTIONS}
+            title="段后(pt)"
+          />
+          <span className="ribbon-hint">段后</span>
+        </span>
       </div>
 
       {/* 样式组 */}

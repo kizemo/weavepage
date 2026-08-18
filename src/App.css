@@ -979,3 +979,48 @@ body {
   color: #aaa;
   cursor: not-allowed;
 }
+
+/* ============ Ribbon 段距 hint + 颜色按钮 label ============ */
+
+/* SelectControl 控件下方的功能说明小字 */
+.ribbon-hint {
+  display: block;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-dim, #888);
+  margin-top: 2px;
+  letter-spacing: 0;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* SelectControl wrap 加 inset 让 hint 紧贴 */
+.ribbon-select-with-hint {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  margin-right: 4px;
+}
+
+/* 颜色按钮带 label 时,把 label 文字加到 swatch 中央 */
+.ribbon-color-wrap.with-label .color-swatch {
+  position: relative;
+  overflow: hidden;
+}
+.color-swatch-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  user-select: none;
+}
+/* 浅色背景时 label 文字仍可读 — 用 mix-blend-mode 提升对比 */
+@media (prefers-color-scheme: light) {
+  .color-swatch-label { mix-blend-mode: difference; color: #fff; }
+}

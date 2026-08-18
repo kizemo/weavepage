@@ -67,9 +67,11 @@ interface ColorControlProps {
   onClear: () => void;
   colors: readonly string[];
   title: string;
+  // 在 swatch 中央叠加的小字符(用于让多个颜色按钮可区分,如「文字」「高亮」「背景」)
+  label?: string;
 }
 
-export function ColorControl({ value, onChange, onClear, colors, title }: ColorControlProps) {
+export function ColorControl({ value, onChange, onClear, colors, title, label }: ColorControlProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -121,13 +123,15 @@ export function ColorControl({ value, onChange, onClear, colors, title }: ColorC
   );
 
   return (
-    <div className="ribbon-color-wrap" ref={wrapRef}>
+    <div className={`ribbon-color-wrap ${label ? "with-label" : ""}`} ref={wrapRef}>
       <button
-        className="color-swatch"
+        className={`color-swatch ${label ? "has-label" : ""}`}
         style={{ background: value || "#000" }}
         title={title}
         onClick={toggle}
-      />
+      >
+        {label && <span className="color-swatch-label">{label}</span>}
+      </button>
       {createPortal(pop, document.body)}
     </div>
   );

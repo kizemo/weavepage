@@ -10,10 +10,12 @@ interface ColorPickerProps {
   colors: readonly string[];
   recents: string[];
   title: string;
+  // 在 swatch 中央叠加的小字符(用于让多个颜色按钮可区分,如「文字」「高亮」「背景」)
+  label?: string;
 }
 
 export function ColorPicker({
-  value, onChange, onClear, colors, recents, title,
+  value, onChange, onClear, colors, recents, title, label,
 }: ColorPickerProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -111,14 +113,16 @@ export function ColorPicker({
   );
 
   return (
-    <div className="ribbon-color-wrap" ref={wrapRef}>
+    <div className={`ribbon-color-wrap ${label ? "with-label" : ""}`} ref={wrapRef}>
       <button
-        className="color-swatch"
+        className={`color-swatch ${label ? "has-label" : ""}`}
         style={{ background: value || "#000" }}
         title={title}
         onClick={toggle}
         aria-label={title}
-      />
+      >
+        {label && <span className="color-swatch-label">{label}</span>}
+      </button>
       {createPortal(pop, document.body)}
     </div>
   );
