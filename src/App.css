@@ -440,6 +440,11 @@ body {
 }
 .ribbon-collapse-btn:hover { background: var(--hover); color: var(--text); }
 .menu-item-right { margin-left: auto; }
+/* 帮助菜单(右对齐的菜单): dropdown 从父容器右缘向左铺开,避免被窗口右边裁剪 */
+.menu-item.menu-item-right > .menu-dropdown {
+  left: auto;
+  right: 0;
+}
 
 .ribbon-body {
   display: flex;

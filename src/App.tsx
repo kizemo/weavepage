@@ -16,7 +16,6 @@ import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
 import { open, save, ask } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile, readFile } from "@tauri-apps/plugin-fs";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
 import { FontSize } from "./extensions/FontSize";
 import { GlobalAttrs, DivNode, SpanNode } from "./extensions/HtmlCompat";
@@ -189,12 +188,11 @@ function App() {
               }
               return `WeavePage-${remote.version}_x64-setup.exe`;
             })();
-            try {
-              await startInAppUpgrade(downloadUrl, filename);
-            } catch (e) {
-              console.warn("in-app upgrade 失败,回退到打开浏览器:", e);
-              await openUrl(APP_DOWNLOAD_URL);
-            }
+            // in-app 升级失败时不再 fallback 到打开浏览器;
+            // startInAppUpgrade 内部已经 message() 报真实错误给用户
+            await startInAppUpgrade(downloadUrl, filename).catch((e) => {
+              console.warn("启动时 in-app upgrade 失败:", e);
+            });
           }
         } catch (e) {
           console.warn("启动更新弹窗失败:", e);
