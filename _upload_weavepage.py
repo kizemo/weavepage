@@ -17,7 +17,7 @@ import paramiko
 SFTP_CONFIG_PATH = r"E:\办公文件\L1网站\.vscode\sftp.json"
 LOCAL_BASE = r"E:\办公文件\L1网站\weavepage"
 REMOTE_BASE = "/var/www/wordpress/weavepage"
-LOCAL_FILE = "WeavePage_0.1.5_x64-setup.exe"
+LOCAL_FILE = "WeavePage_0.1.6_x64-setup.exe"
 
 
 def md5_file(path):
