@@ -44,7 +44,7 @@ export function parseStyleBlock(css: string): DefaultStyleMap {
       const name = decl.slice(0, idx).trim().toLowerCase();
       const value = decl.slice(idx + 1).trim();
       if (!name || !value) return;
-      if (!SUPPORTED_PROPS.includes(name)) return;
+      if (!SUPPORTED_PROPS_ANY.includes(name)) return;
       props[name] = value;
     });
     if (Object.keys(props).length > 0) {
@@ -55,6 +55,8 @@ export function parseStyleBlock(css: string): DefaultStyleMap {
 }
 
 // 按白名单顺序输出属性(白名单外的属性追加到末尾保留)
+const SUPPORTED_PROPS_ANY = SUPPORTED_PROPS as readonly string[];
+
 const serializeProps = (props: Record<string, string>): string => {
   const ordered: string[] = [];
   for (const p of SUPPORTED_PROPS) {
@@ -64,7 +66,7 @@ const serializeProps = (props: Record<string, string>): string => {
     }
   }
   for (const k of Object.keys(props)) {
-    if (!SUPPORTED_PROPS.includes(k as never)) ordered.push(`${k}: ${props[k]}`);
+    if (!SUPPORTED_PROPS_ANY.includes(k)) ordered.push(`${k}: ${props[k]}`);
   }
   return ordered.join("; ");
 };
@@ -93,7 +95,7 @@ export function upsertStyleBlock(
   map[selector] = { ...(map[selector] ?? {}), ...props };
   // 过滤非白名单属性(白名单防御,防止调用方传脏数据)
   for (const k of Object.keys(map[selector]!)) {
-    if (!SUPPORTED_PROPS.includes(k as never)) delete map[selector]![k];
+    if (!SUPPORTED_PROPS_ANY.includes(k)) delete map[selector]![k];
   }
   const css = serializeStyleBlock(map);
   return `<style id="${STYLE_BLOCK_ID}">\n${css}\n</style>`;

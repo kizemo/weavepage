@@ -104,7 +104,8 @@ test("SUPPORTED_SELECTORS 含 p / h1-h6", () => {
 
 test("SUPPORTED_PROPS 共 8 项", () => {
   assert.equal(SUPPORTED_PROPS.length, 8);
+  const propsAny = SUPPORTED_PROPS as readonly string[];
   for (const p of ["font-family", "font-size", "color", "background-color", "text-align", "line-height", "margin-top", "margin-bottom"]) {
-    assert.ok(SUPPORTED_PROPS.includes(p));
+    assert.ok(propsAny.includes(p));
   }
 });
