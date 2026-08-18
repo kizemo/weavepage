@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "opener:allow-open-path",
     "dialog:default",
     "fs:default",
     "fs:allow-read-text-file",
@@ -15,6 +16,14 @@
     {
       "identifier": "fs:scope",
       "allow": ["**"]
+    },
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "https://www.aiec.fun" },
+        { "url": "https://*.aiec.fun" }
+      ]
     }
   ]
 }
