@@ -17,7 +17,7 @@ import paramiko
 SFTP_CONFIG_PATH = r"E:\办公文件\L1网站\.vscode\sftp.json"
 LOCAL_BASE = r"E:\办公文件\L1网站\weavepage"
 REMOTE_BASE = "/var/www/wordpress/weavepage"
-LOCAL_FILE = "WeavePage_0.1.2_x64-setup.exe"
+LOCAL_FILE = "WeavePage_0.1.5_x64-setup.exe"
 
 
 def md5_file(path):
@@ -162,7 +162,7 @@ def main():
 
     client.close()
 
-    print(f"\n[DONE] WeavePage_0.1.2_x64-setup.exe 已上传到 {remote_path}")
+    print(f"\n[DONE] {LOCAL_FILE} 已上传到 {remote_path}")
     print(f"       公开 URL: https://www.aiec.fun/weavepage/{LOCAL_FILE}")
 
 
