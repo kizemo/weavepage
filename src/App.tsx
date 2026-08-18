@@ -14,8 +14,10 @@ import TableCell from "@tiptap/extension-table-cell";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open, save, ask } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile, readFile } from "@tauri-apps/plugin-fs";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { getVersion } from "@tauri-apps/api/app";
 import { FontSize } from "./extensions/FontSize";
 import { GlobalAttrs, DivNode, SpanNode } from "./extensions/HtmlCompat";
 import { MenuBar } from "./components/MenuBar";
@@ -28,10 +30,25 @@ import { Sidebar } from "./components/Sidebar";
 import { BlockSourcePanel } from "./components/BlockSourcePanel";
 import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
+import { AboutDialog } from "./components/AboutDialog";
+import { EditorContextMenu } from "./components/EditorContextMenu";
 import { formatHtml } from "./utils/formatHtml";
 import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
 import { loadRecentColors, pushRecentColor } from "./utils/recentColors";
 import type { ColorKind, RecentColorsResult } from "./utils/recentColors";
+import {
+  fetchRemoteVersion,
+  compareVersions,
+  APP_DOWNLOAD_URL,
+} from "./utils/updateCheck";
+import {
+  applyLineHeight,
+  applyParagraphSpacing,
+} from "./utils/paragraphSpacing";
+import {
+  upsertShellHead,
+  blockTypeToSelector,
+} from "./utils/defaultStyle";
 import "./App.css";
 
 const THEME_KEY = "tiptap-theme";
@@ -98,12 +115,22 @@ function App() {
   const [isModified, setIsModified] = useState(false);
   const [shell, setShell] = useState<DocShell | null>(null);
   const [blockPanelPos, setBlockPanelPos] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    blockType: string | null;
+    blockAttrs?: Record<string, unknown>;
+    blockPos: number;
+  } | null>(null);
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<RibbonTab>("edit");
   const [wordCount, setWordCount] = useState(0);
   const [showSidebar, setShowSidebar] = useState(true);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
   const [recentColors, setRecentColors] = useState<RecentColorsResult>({ text: [], highlight: [] });
+  const [appVersion, setAppVersion] = useState("");
+  const [showAbout, setShowAbout] = useState(false);
+  const [startupPromptShown, setStartupPromptShown] = useState(false);
 
   // ---- 启动加载最近文件 / 最近颜色 ----
   useEffect(() => {
@@ -111,6 +138,54 @@ function App() {
     loadRecentColors()
       .then(setRecentColors)
       .catch((e) => console.warn("loadRecentColors 失败:", e));
+  }, []);
+
+  // ---- 启动：读取当前版本 + 检查在线更新 ----
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      let current = "";
+      try {
+        current = await getVersion();
+      } catch (e) {
+        console.warn("getVersion 失败:", e);
+        return;
+      }
+      if (!mounted) return;
+      setAppVersion(current);
+
+      const remote = await fetchRemoteVersion();
+      if (!mounted) return;
+      const newer = !!(remote && remote.version && compareVersions(remote.version, current) > 0);
+
+      // 启动弹窗（仅一次）：发现新版本时询问用户
+      if (newer && remote && !startupPromptShown) {
+        setStartupPromptShown(true);
+        try {
+          const yes = await ask(
+            `发现新版本 v${remote.version}（当前 v${current}）\n\n${remote.notes ?? ""}`,
+            {
+              title: "WeavePage 有新版本",
+              kind: "info",
+              okLabel: "去下载",
+              cancelLabel: "稍后",
+            }
+          );
+          if (yes && mounted) {
+            await openUrl(APP_DOWNLOAD_URL);
+          }
+        } catch (e) {
+          console.warn("启动更新弹窗失败:", e);
+        }
+      } else {
+        setStartupPromptShown(true);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+    // startupPromptShown 在闭包里访问 — 启动弹窗只触发一次即可,变更后 effect 不再重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeDoc = docs.find((d) => d.id === activeId) ?? docs[0];
@@ -748,7 +823,7 @@ ${sh.styles}
     [editor, activeDoc, mode, sourceText, syncFromSource, buildFullDoc, shell]
   );
 
-  // ---- 右键：打开所在块的源代码面板 ----
+  // ---- 右键：弹出 EditorContextMenu(块源码 / 设为默认样式) ----
   const handleEditorContextMenu = useCallback(
     (e: React.MouseEvent) => {
       if (!editor || activeDoc.kind !== "html" || mode !== "edit") return;
@@ -759,10 +834,123 @@ ${sh.styles}
       while (depth > 0 && !$pos.node(depth).isBlock) depth--;
       if (depth === 0) return;
       e.preventDefault();
-      setBlockPanelPos($pos.before(depth));
+      const node = $pos.node(depth);
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        blockType: node.type.name,
+        blockAttrs: node.attrs as Record<string, unknown>,
+        blockPos: $pos.before(depth),
+      });
     },
     [editor, activeDoc, mode]
   );
+
+  // ---- 段间距:对每个选中块直接写 inline style(Tiptap 命令链对 inline style 不友好)----
+  const handleSpacingChange = useCallback(
+    (s: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => {
+      if (!editor) return;
+      const { state } = editor;
+      const { from, to } = state.selection;
+      let touched = false;
+      state.doc.nodesBetween(from, to, (_node, pos) => {
+        const dom = editor.view.nodeDOM(pos);
+        if (!(dom instanceof HTMLElement)) return;
+        // 跳过 inline / text 节点;只对块级元素改 inline style
+        const display = window.getComputedStyle(dom).display;
+        if (display.startsWith("inline")) return;
+        let style = dom.getAttribute("style") ?? "";
+        if (s.lineHeight !== undefined) {
+          style = applyLineHeight(style, s.lineHeight);
+          touched = true;
+        }
+        if (s.marginTop !== undefined) {
+          style = applyParagraphSpacing(style, "top", s.marginTop);
+          touched = true;
+        }
+        if (s.marginBottom !== undefined) {
+          style = applyParagraphSpacing(style, "bottom", s.marginBottom);
+          touched = true;
+        }
+        dom.setAttribute("style", style);
+      });
+      if (touched) {
+        // 触发编辑器 onChange(空事务即可拿到 body 新 html)
+        editor.view.dispatch(editor.state.tr);
+        setIsModified(true);
+        updateActiveDoc({ isModified: true });
+      }
+    },
+    [editor, updateActiveDoc]
+  );
+
+  // ---- 读取当前块的「显式改过」的 8 项属性(白名单)----
+  const readBlockExplicitProps = useCallback((): Record<string, string> => {
+    if (!editor) return {};
+    try {
+      const { from } = editor.state.selection;
+      const dom = editor.view.domAtPos(from).node;
+      const el = dom instanceof Element ? dom : (dom.parentElement ?? null);
+      if (!(el instanceof HTMLElement)) return {};
+      // inline 节点(光标在 span 内)跳过;只对块级元素读 inline style
+      const display = window.getComputedStyle(el).display;
+      if (display.startsWith("inline")) return {};
+      const props: Record<string, string> = {};
+
+      // textStyle mark 属性
+      const ts = editor.getAttributes("textStyle");
+      if (ts.fontFamily) props["font-family"] = String(ts.fontFamily);
+      if (ts.fontSize) props["font-size"] = String(ts.fontSize);
+      if (ts.color) props.color = String(ts.color);
+
+      // highlight mark → background-color
+      const hl = editor.getAttributes("highlight");
+      if (hl.color) props["background-color"] = String(hl.color);
+
+      // 块 inline style:取 text-align / line-height / margin-top / margin-bottom
+      const styleStr = el.getAttribute("style") ?? "";
+      const get = (name: string) => {
+        const m = styleStr.match(
+          new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, "i"),
+        );
+        return m ? m[1]!.trim() : null;
+      };
+      const ta = get("text-align");
+      if (ta && ta !== "start" && ta !== "") props["text-align"] = ta;
+      const lh = get("line-height");
+      if (lh && lh !== "normal" && lh !== "") props["line-height"] = lh;
+      const mt = get("margin-top");
+      if (mt) props["margin-top"] = mt;
+      const mb = get("margin-bottom");
+      if (mb) props["margin-bottom"] = mb;
+
+      return props;
+    } catch {
+      return {};
+    }
+  }, [editor]);
+
+  // ---- 「设为默认样式」:把当前块显式属性 upsert 进 head 内嵌命名块 ----
+  const handleSetAsDefault = useCallback(() => {
+    if (!editor || !shell) return;
+    const { state } = editor;
+    const { from } = state.selection;
+    const $pos = state.doc.resolve(from);
+    let depth = $pos.depth;
+    while (depth > 0 && !$pos.node(depth).isBlock) depth--;
+    if (depth === 0) return;
+    const node = $pos.node(depth);
+    const selector = blockTypeToSelector(
+      node.type.name,
+      node.attrs as Record<string, unknown>,
+    );
+    if (!selector) return;
+    const props = readBlockExplicitProps();
+    if (Object.keys(props).length === 0) return;
+    const { head, headCss } = upsertShellHead(shell.head, selector, props);
+    updateActiveDoc({ shell: { ...shell, head, headCss } });
+    setShell({ ...shell, head, headCss });
+  }, [editor, shell, readBlockExplicitProps, updateActiveDoc]);
 
   // ---- 快捷键 ----
   const refs = useRef({
@@ -885,6 +1073,7 @@ ${sh.styles}
         onToggleRibbon={() => setRibbonCollapsed((v) => !v)}
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        onAbout={() => setShowAbout(true)}
       />
 
       {/* 文档标签栏 */}
@@ -905,6 +1094,7 @@ ${sh.styles}
         recentTextColors={recentColors.text}
         recentHighlightColors={recentColors.highlight}
         onColorUsed={onColorUsed}
+        onSpacingChange={handleSpacingChange}
       />
 
       {/* 主区域：侧边栏 + 内容 */}
@@ -971,6 +1161,25 @@ ${sh.styles}
             onClose={() => setBlockPanelPos(null)}
           />
         )}
+
+        {/* 右键菜单（块源码 / 设为默认样式） */}
+        {contextMenu && !isTextDoc && mode === "edit" && (
+          <EditorContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            blockType={contextMenu.blockType}
+            blockAttrs={contextMenu.blockAttrs}
+            onBlockSource={() => {
+              setBlockPanelPos(contextMenu.blockPos);
+              setContextMenu(null);
+            }}
+            onSetAsDefault={() => {
+              handleSetAsDefault();
+              setContextMenu(null);
+            }}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
       </div>
 
       {/* 状态栏 */}
@@ -983,6 +1192,9 @@ ${sh.styles}
         onThemeChange={setTheme}
         mode={mode}
       />
+
+      {/* 关于弹窗 */}
+      {showAbout && <AboutDialog currentVersion={appVersion || "0.0.0"} onClose={() => setShowAbout(false)} />}
     </div>
   );
 }
