@@ -6,6 +6,12 @@ import "@tiptap/extension-text-align";
 import { GroupTitle, RibbonButton, SelectControl } from "./controls";
 import { ColorPicker } from "./ColorPicker";
 import { FONT_FAMILIES, FONT_SIZES, TEXT_COLORS, HIGHLIGHT_COLORS } from "../utils/fonts";
+import {
+  readLineHeightFromStyle,
+  readMarginFromStyle,
+  LINE_HEIGHT_OPTIONS,
+  PARAGRAPH_SPACING_OPTIONS,
+} from "../utils/paragraphSpacing";
 
 interface RibbonHomeProps {
   editor: Editor;
@@ -13,6 +19,7 @@ interface RibbonHomeProps {
   recentTextColors: string[];
   recentHighlightColors: string[];
   onColorUsed: (kind: "text" | "highlight", color: string) => void;
+  onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
 }
 
 // px 转 pt（1pt = 4/3px），用于把计算样式字号映射到字号下拉的 pt 体系
@@ -22,7 +29,14 @@ const pxToPt = (px: string): string => {
   return `${Math.round(v * 0.75 * 2) / 2}pt`;
 };
 
-export function RibbonHome({ editor, onLink, recentTextColors, recentHighlightColors, onColorUsed }: RibbonHomeProps) {
+export function RibbonHome({
+  editor,
+  onLink,
+  recentTextColors,
+  recentHighlightColors,
+  onColorUsed,
+  onSpacingChange,
+}: RibbonHomeProps) {
   // 选区/文档每次变化都重新派生格式状态，选中文字时功能区实时显示其格式
   const fmt = useEditorState({
     editor,
@@ -30,11 +44,16 @@ export function RibbonHome({ editor, onLink, recentTextColors, recentHighlightCo
       const mark = editor.getAttributes("textStyle");
       // 选中文字时读取实际渲染样式（文档 CSS 生效的场景），光标状态只看显式标记
       let cs: CSSStyleDeclaration | null = null;
+      // 当前光标/选区的最近 DOM 节点的内联 style（blockEl)→给段落组行距 / 段前后用
+      let blockStyle = "";
       try {
         const { from } = editor.state.selection;
         const dom = editor.view.domAtPos(from).node;
         const el = dom instanceof Element ? dom : (dom.parentElement ?? null);
-        if (el && !editor.state.selection.empty) cs = window.getComputedStyle(el);
+        if (el) {
+          blockStyle = el.getAttribute("style") ?? "";
+          if (!editor.state.selection.empty) cs = window.getComputedStyle(el);
+        }
       } catch {
         cs = null;
       }
@@ -66,6 +85,10 @@ export function RibbonHome({ editor, onLink, recentTextColors, recentHighlightCo
         link: editor.isActive("link"),
         canLift: editor.can().liftListItem("listItem"),
         canSink: editor.can().sinkListItem("listItem"),
+        // 段距派生
+        lineHeight: readLineHeightFromStyle(blockStyle),
+        marginTop: readMarginFromStyle(blockStyle, "top"),
+        marginBottom: readMarginFromStyle(blockStyle, "bottom"),
       };
     },
   });
@@ -115,6 +138,14 @@ export function RibbonHome({ editor, onLink, recentTextColors, recentHighlightCo
     () => editor.chain().focus().unsetHighlight().run(),
     [editor]
   );
+
+  // 段间距回调:包一层把 SelectControl 的 string 转 number(undefined 表示「没选有效值」)
+  const handleLineHeight = (v: string) =>
+    onSpacingChange({ lineHeight: parseFloat(v) || undefined });
+  const handleMarginTop = (v: string) =>
+    onSpacingChange({ marginTop: parseFloat(v) || undefined });
+  const handleMarginBottom = (v: string) =>
+    onSpacingChange({ marginBottom: parseFloat(v) || undefined });
 
   return (
     <>
@@ -262,6 +293,24 @@ export function RibbonHome({ editor, onLink, recentTextColors, recentHighlightCo
           label="代码块"
           onClick={() => editor.chain().focus().toggleCodeBlock().run()}
           active={fmt.codeBlock}
+        />
+        <SelectControl
+          value={fmt.lineHeight === "" ? "" : String(fmt.lineHeight)}
+          onChange={handleLineHeight}
+          options={LINE_HEIGHT_OPTIONS}
+          title="行距"
+        />
+        <SelectControl
+          value={fmt.marginTop === "" ? "" : `${fmt.marginTop}pt`}
+          onChange={handleMarginTop}
+          options={PARAGRAPH_SPACING_OPTIONS}
+          title="段前(pt)"
+        />
+        <SelectControl
+          value={fmt.marginBottom === "" ? "" : `${fmt.marginBottom}pt`}
+          onChange={handleMarginBottom}
+          options={PARAGRAPH_SPACING_OPTIONS}
+          title="段后(pt)"
         />
       </div>
 

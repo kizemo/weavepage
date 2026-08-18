@@ -22,6 +22,8 @@ interface RibbonProps {
   recentTextColors: string[];
   recentHighlightColors: string[];
   onColorUsed: (kind: "text" | "highlight", color: string) => void;
+  // RibbonHome 段落组行距 / 段前后 回调(由 App.tsx 实现,直接改 Tiptap 节点的 inline style)
+  onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
 }
 
 export function Ribbon(props: RibbonProps) {
@@ -43,6 +45,7 @@ export function Ribbon(props: RibbonProps) {
               recentTextColors={props.recentTextColors}
               recentHighlightColors={props.recentHighlightColors}
               onColorUsed={props.onColorUsed}
+              onSpacingChange={props.onSpacingChange}
             />
           ) : (
             <RibbonInsert
