@@ -49,6 +49,7 @@ import {
   upsertShellHead,
   blockTypeToSelector,
 } from "./utils/defaultStyle";
+import { applyBodyBackground } from "./utils/headShell";
 import "./App.css";
 
 const THEME_KEY = "tiptap-theme";
@@ -866,7 +867,19 @@ ${sh.styles}
     [editor, activeDoc, mode]
   );
 
-  // ---- 段间距:对每个选中块直接写 inline style(Tiptap 命令链对 inline style 不友好)----
+  // ---- 页面背景色:写到 shell.head + shell.headCss(body 规则,被 scopedCss 改名为 .editor-body)----
+  const handlePageBg = useCallback(
+    (hex: string) => {
+      if (!shell) return;
+      const next = applyBodyBackground(shell.head, shell.headCss, hex);
+      setShell({ ...shell, head: next.head, headCss: next.headCss });
+      updateActiveDoc({ shell: { ...shell, head: next.head, headCss: next.headCss } });
+      setIsModified(true);
+    },
+    [shell, updateActiveDoc]
+  );
+
+// ---- 段间距:对每个选中块直接写 inline style(Tiptap 命令链对 inline style 不友好)----
   const handleSpacingChange = useCallback(
     (s: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => {
       if (!editor) return;
@@ -1115,6 +1128,7 @@ ${sh.styles}
         recentHighlightColors={recentColors.highlight}
         onColorUsed={onColorUsed}
         onSpacingChange={handleSpacingChange}
+        onPageBgChange={handlePageBg}
       />
 
       {/* 主区域：侧边栏 + 内容 */}

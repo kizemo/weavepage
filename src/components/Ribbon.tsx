@@ -24,6 +24,8 @@ interface RibbonProps {
   onColorUsed: (kind: "text" | "highlight", color: string) => void;
   // RibbonHome 段落组行距 / 段前后 回调(由 App.tsx 实现,直接改 Tiptap 节点的 inline style)
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
+  // RibbonHome 页面背景色回调(由 App.tsx 写到 shell.headCss)
+  onPageBgChange: (hex: string) => void;
 }
 
 export function Ribbon(props: RibbonProps) {
@@ -46,6 +48,7 @@ export function Ribbon(props: RibbonProps) {
               recentHighlightColors={props.recentHighlightColors}
               onColorUsed={props.onColorUsed}
               onSpacingChange={props.onSpacingChange}
+              onPageBgChange={props.onPageBgChange}
             />
           ) : (
             <RibbonInsert

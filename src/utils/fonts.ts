@@ -33,3 +33,12 @@ export const HIGHLIGHT_COLORS = [
   "#ffc000", "#c00000", "#ff0000", "#00b0f0",
   "#92d050", "#00b050", "#7030a0", "#e6e6e6",
 ] as const;
+
+// 页面背景色(写到 shell.headCss 的 body 规则,被 scopedCss 改名为 .editor-body)
+// 浅色为主:暖白/奶白/浅米/浅灰/粉彩/薰衣草 — 大部分是低饱和高亮度的浅色调
+export const PAGE_BG_COLORS = [
+  "#ffffff", "#fafafa", "#f5f5f5", "#eeeeee",
+  "#fff8f0", "#fdf6e3", "#f5efe6", "#f0e9d6",
+  "#fff0f5", "#fdeef4", "#f3e8ff", "#eaf3ff",
+  "#e8f5e9", "#f0f4c3", "#fce4ec", "#fff8e1",
+] as const;

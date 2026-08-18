@@ -5,7 +5,7 @@ import "@tiptap/extension-highlight";
 import "@tiptap/extension-text-align";
 import { GroupTitle, RibbonButton, SelectControl } from "./controls";
 import { ColorPicker } from "./ColorPicker";
-import { FONT_FAMILIES, FONT_SIZES, TEXT_COLORS, HIGHLIGHT_COLORS } from "../utils/fonts";
+import { FONT_FAMILIES, FONT_SIZES, TEXT_COLORS, HIGHLIGHT_COLORS, PAGE_BG_COLORS } from "../utils/fonts";
 import {
   readLineHeightFromStyle,
   readMarginFromStyle,
@@ -20,6 +20,7 @@ interface RibbonHomeProps {
   recentHighlightColors: string[];
   onColorUsed: (kind: "text" | "highlight", color: string) => void;
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
+  onPageBgChange: (hex: string) => void;
 }
 
 // px 转 pt（1pt = 4/3px），用于把计算样式字号映射到字号下拉的 pt 体系
@@ -36,6 +37,7 @@ export function RibbonHome({
   recentHighlightColors,
   onColorUsed,
   onSpacingChange,
+  onPageBgChange,
 }: RibbonHomeProps) {
   // 选区/文档每次变化都重新派生格式状态，选中文字时功能区实时显示其格式
   const fmt = useEditorState({
@@ -149,25 +151,6 @@ export function RibbonHome({
 
   return (
     <>
-      {/* 撤销组 */}
-      <div className="ribbon-group">
-        <GroupTitle>撤销</GroupTitle>
-        <RibbonButton
-          icon="↩"
-          label="撤销"
-          onClick={() => editor.chain().focus().undo().run()}
-          disabled={!fmt.canUndo}
-          title="撤销 (Ctrl+Z)"
-        />
-        <RibbonButton
-          icon="↪"
-          label="重做"
-          onClick={() => editor.chain().focus().redo().run()}
-          disabled={!fmt.canRedo}
-          title="重做 (Ctrl+Y)"
-        />
-      </div>
-
       {/* 字体组 */}
       <div className="ribbon-group">
         <GroupTitle>字体</GroupTitle>
@@ -222,6 +205,14 @@ export function RibbonHome({
           colors={HIGHLIGHT_COLORS}
           recents={recentHighlightColors}
           title="高亮"
+        />
+        <ColorPicker
+          value=""
+          onChange={(c) => onPageBgChange(c)}
+          onClear={() => onPageBgChange("#ffffff")}
+          colors={PAGE_BG_COLORS}
+          recents={[]}
+          title="页面背景"
         />
       </div>
 
