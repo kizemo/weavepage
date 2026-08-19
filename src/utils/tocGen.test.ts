@@ -77,3 +77,52 @@ test("scanHeadings id 已有时不覆盖", () => {
   const out = scanHeadings(root);
   assert.equal(out[0]!.id, "custom");
 });
+
+import { buildDocTocHtml } from "./tocGen";
+
+const escapeCheck = (() => {
+  // 用一个含 < > & " 的条目,验证 escape
+})();
+
+test("buildDocTocHtml 空 entries 给空提示", () => {
+  const html = buildDocTocHtml([]);
+  assert.match(html, /class="doc-toc-empty"/);
+  assert.match(html, /无标题|未找到/);
+});
+
+test("buildDocTocHtml h2 / h3 嵌套", () => {
+  const html = buildDocTocHtml([
+    { level: 2, text: "A", id: "wp-toc-a" },
+    { level: 3, text: "a1", id: "wp-toc-a-2" },
+    { level: 2, text: "B", id: "wp-toc-b" },
+  ]);
+  assert.match(html, /<a class="doc-toc-h2" href="#wp-toc-a">A<\/a>/);
+  assert.match(html, /<a class="doc-toc-h3" href="#wp-toc-a-2">a1<\/a>/);
+  assert.match(html, /<a class="doc-toc-h2" href="#wp-toc-b">B<\/a>/);
+  // a1 的 <li> 必须嵌在 A 的 <li> 内(用 doc-toc-list-wrap > ul ul 嵌套验证)
+  const a1Idx = html.indexOf('href="#wp-toc-a-2"');
+  const aIdx = html.indexOf('href="#wp-toc-a"');
+  const bIdx = html.indexOf('href="#wp-toc-b"');
+  assert.ok(aIdx < a1Idx && a1Idx < bIdx, "顺序错");
+  assert.ok(html.indexOf("<ul>", aIdx) < a1Idx, "a1 应嵌在 A 的 <ul> 内");
+});
+
+test("buildDocTocHtml 转义 HTML 特殊字符", () => {
+  const html = buildDocTocHtml([
+    { level: 2, text: "<script>alert(1)</script>", id: "x" },
+  ]);
+  assert.ok(!html.includes("<script>alert"), "不能含未转义 <script>");
+  assert.match(html, /&lt;script&gt;/);
+});
+
+test("buildDocTocHtml contenteditable=false 防止 ProseMirror 接管", () => {
+  const html = buildDocTocHtml([{ level: 2, text: "A", id: "wp-toc-a" }]);
+  assert.match(html, /contenteditable="false"/);
+});
+
+test("buildDocTocHtml 默认折叠:list-wrap 在标题之后 + ▾ 字符", () => {
+  const html = buildDocTocHtml([{ level: 2, text: "A", id: "wp-toc-a" }]);
+  assert.match(html, /doc-toc-title/);
+  assert.match(html, /doc-toc-list-wrap/);
+  assert.match(html, /▾|目录/);
+});
