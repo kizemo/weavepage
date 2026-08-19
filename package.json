@@ -1,14 +1,16 @@
 {
   "name": "weavepage",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "release": "tauri build && node scripts/copy-release.mjs"
+    "release": "tauri build && node scripts/copy-release.mjs full",
+    "release:update": "tauri build --config src-tauri/tauri.conf.update.json && node scripts/copy-release.mjs update",
+    "release:both": "pnpm release && pnpm release:update"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

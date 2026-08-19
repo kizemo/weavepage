@@ -55,7 +55,8 @@ export function AboutDialog({ currentVersion, onClose }: AboutDialogProps) {
     // 不再 openUrl 跳浏览器
     if (status.kind !== "newversion") return;
     const remote = status.remote;
-    const downloadUrl = remote.url;
+    // 应用内升级优先用 update_url(轻量渠道),兜底 full url
+    const downloadUrl = remote.update_url || remote.url;
     if (!downloadUrl) return;
     // 从 URL 末段拿文件名,失败回退恒定
     const filename = (() => {

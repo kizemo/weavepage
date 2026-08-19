@@ -67,13 +67,15 @@ interface DocShell {
   baseHref: string;
 }
 
-// 文档 CSS 作用域限定到编辑区：html→.editor-scroll，body→.editor-body，避免污染应用界面
+// 文档 CSS 作用域限定到编辑区：html→.editor-scroll，body→.editor-scroll .editor-body，避免污染应用界面
+// body 选择器带 .editor-scroll 前缀,使其与 App.css 的 .editor-page .editor-body / .editor-wide .editor-body
+// 同为 (0,2,0) 优先级,而注入的 <style> 在 DOM 中位于 App.css 之后,平局靠后胜出,可正确覆盖页式视图的「白纸」背景
 // 固定定位（fixed）转为绝对定位（absolute），以编辑窗口为定位边界，不超出编辑区
 const scopedCss = (css: string): string =>
   css
     .replace(
       /(^|[\s}])(html|body)(?=[\s{])/g,
-      (_m, pre, tag) => pre + (tag === "html" ? ".editor-scroll" : ".editor-body")
+      (_m, pre, tag) => pre + (tag === "html" ? ".editor-scroll" : ".editor-scroll .editor-body")
     )
     .replace(/position:\s*fixed/gi, "position: absolute");
 
@@ -173,9 +175,9 @@ function App() {
             }
           );
           if (yes && mounted) {
-            // 优先用 version.json 里精确指向的 installer URL(走 ?file= 直接 serve)
-            // 兜底用 APP_DOWNLOAD_URL(它也直接 serve 了,见 v0.1.5 hotfix)
-            const downloadUrl = remote.url || APP_DOWNLOAD_URL;
+            // 应用内升级优先用 update_url(轻量渠道,无 WebView2 离线包);
+            // 兜底 full url,再兜底落地页
+            const downloadUrl = remote.update_url || remote.url || APP_DOWNLOAD_URL;
             // 从 URL 末段拿文件名,失败回退恒定
             const filename = (() => {
               try {
@@ -867,13 +869,23 @@ ${sh.styles}
     [editor, activeDoc, mode]
   );
 
-  // ---- 页面背景色:写到 shell.head + shell.headCss(body 规则,被 scopedCss 改名为 .editor-body)----
+  // ---- 页面背景色:写到 shell.head + shell.headCss(body 规则,被 scopedCss 改名为 .editor-scroll .editor-body)----
+  // 空文档(shell=null):用最小 DocShell 兜底,使背景能立刻生效,保存时也能带上 body bg
   const handlePageBg = useCallback(
     (hex: string) => {
-      if (!shell) return;
-      const next = applyBodyBackground(shell.head, shell.headCss, hex);
-      setShell({ ...shell, head: next.head, headCss: next.headCss });
-      updateActiveDoc({ shell: { ...shell, head: next.head, headCss: next.headCss } });
+      const baseShell: DocShell = shell ?? {
+        doctype: "<!DOCTYPE html>",
+        head: "",
+        headCss: "",
+        bodyAttrs: "",
+        scripts: "",
+        styles: "",
+        baseHref: "",
+      };
+      const next = applyBodyBackground(baseShell.head, baseShell.headCss, hex);
+      const newShell = { ...baseShell, head: next.head, headCss: next.headCss };
+      setShell(newShell);
+      updateActiveDoc({ shell: newShell });
       setIsModified(true);
     },
     [shell, updateActiveDoc]

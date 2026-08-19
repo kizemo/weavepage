@@ -6,7 +6,15 @@
 - paramiko.WarningPolicy() 而非 AutoAddPolicy (防 silent TOFU)
 - 上传后跑 server-side md5sum 与本地 md5 比对 (cross-source verify)
 
-用法: python _upload_weavepage.py
+v0.1.11 起改为双渠道:
+  - setup.exe  (full 渠道) — 落地页 / GitHub release / 新装机
+  - update.exe (update 渠道) — 应用内升级 (embedBootstrapper, 极轻量)
+两个文件一次跑完上传 + 各自 md5/size 校验。
+
+用法:
+  cp release/WeavePage_X.Y.Z_x64-setup.exe  E:\\办公文件\\L1网站\\weavepage\\
+  cp release/WeavePage_X.Y.Z_x64-update.exe E:\\办公文件\\L1网站\\weavepage\\
+  python _upload_weavepage.py
 """
 import json
 import os
@@ -17,7 +25,12 @@ import paramiko
 SFTP_CONFIG_PATH = r"E:\办公文件\L1网站\.vscode\sftp.json"
 LOCAL_BASE = r"E:\办公文件\L1网站\weavepage"
 REMOTE_BASE = "/var/www/wordpress/weavepage"
-LOCAL_FILE = "WeavePage_0.1.10_x64-setup.exe"
+
+# 待上传的 installer 文件名列表(完整双渠道)
+FILES_TO_UPLOAD = [
+    "WeavePage_0.1.11_x64-setup.exe",
+    "WeavePage_0.1.11_x64-update.exe",
+]
 
 
 def md5_file(path):
@@ -56,27 +69,68 @@ def find_known_hosts():
     return None
 
 
+# 单文件原子步骤:put + server-side md5 + size 校验;出错 sys.exit(1)
+def upload_with_verify(client, sftp, local_path, filename):
+    local_size = os.path.getsize(local_path)
+    print(f"\n  --- 文件: {filename} ---")
+    print(f"    local:  {local_path}")
+    print(f"    size:   {local_size:,} bytes ({local_size / 1024 / 1024:.1f} MiB)")
+    local_md5 = md5_file(local_path)
+    print(f"    md5:    {local_md5}")
+
+    remote_path = f"{REMOTE_BASE}/{filename}"
+    print(f"    upload -> {remote_path} ...", end=" ", flush=True)
+    try:
+        sftp.put(local_path, remote_path)
+        print("OK")
+    except Exception as e:
+        print(f"FAIL: {e}")
+        sys.exit(1)
+
+    # Server-side md5 verify
+    stdin, stdout, stderr = client.exec_command(f"md5sum '{remote_path}'")
+    line = stdout.readline().strip()
+    if not line:
+        err = stderr.read().decode("utf-8", errors="ignore")
+        print(f"    [ERR] md5sum 输出为空: {err}")
+        sys.exit(1)
+    server_md5 = line.split()[0].upper()
+    server_size_field = line.split()[1] if len(line.split()) >= 2 else "?"
+    print(f"    server md5:   {server_md5}")
+    print(f"    server size:  {server_size_field}")
+    if server_md5 != local_md5:
+        print(f"    [ERR] md5 MISMATCH — server != local")
+        sys.exit(1)
+    print(f"    md5  check:   OK")
+
+    # Server-side size check (冗余)
+    stdin, stdout, stderr = client.exec_command(f"stat -c '%s' '{remote_path}'")
+    server_stat_size = stdout.readline().strip()
+    if server_stat_size != str(local_size):
+        print(f"    [ERR] size MISMATCH (server {server_stat_size} != local {local_size})")
+        sys.exit(1)
+    print(f"    size check:   OK")
+
+
 def main():
     cfg = load_sftp_config()
-    print(f"=== [1/5] SFTP config loaded ===")
+    print(f"=== [1/3] SFTP config loaded ===")
     print(f"  host={cfg['host']} port={cfg['port']} user={cfg['username']}")
     print(f"  protocol={cfg['protocol']} remotePath={cfg['remotePath']}")
 
-    local_path = os.path.join(LOCAL_BASE, LOCAL_FILE)
-    if not os.path.exists(local_path):
-        print(f"  [ERR] 本地文件不存在: {local_path}")
-        sys.exit(1)
-    local_size = os.path.getsize(local_path)
-    print(f"\n=== [2/5] 本地文件预检 ===")
-    print(f"  {LOCAL_FILE}")
-    print(f"  path:  {local_path}")
-    print(f"  size:  {local_size:,} bytes ({local_size / 1024 / 1024:.1f} MiB)")
+    # 预检:所有文件必须都存在(脚本不擅长只传一半)
+    print(f"\n=== [2/3] 本地预检 ({len(FILES_TO_UPLOAD)} 个文件) ===")
+    pending = []
+    for filename in FILES_TO_UPLOAD:
+        local_path = os.path.join(LOCAL_BASE, filename)
+        if not os.path.exists(local_path):
+            print(f"  [ERR] 本地文件不存在: {local_path}")
+            sys.exit(1)
+        print(f"  [OK] {filename}  ({os.path.getsize(local_path) / 1024 / 1024:.1f} MiB)")
+        pending.append((local_path, filename))
+    print(f"  共 {len(pending)} 个文件待上传")
 
-    print(f"\n=== [3/5] 本地 md5 计算 ===")
-    local_md5 = md5_file(local_path)
-    print(f"  md5:   {local_md5}")
-
-    print(f"\n=== [4/5] SFTP 连接 + 远程目录创建 + 上传 ===")
+    print(f"\n=== [3/3] SFTP 连接 + 上传 + 校验 ===")
     client = paramiko.SSHClient()
     known_hosts_path = find_known_hosts()
     if known_hosts_path:
@@ -116,54 +170,15 @@ def main():
     else:
         print(f"  {REMOTE_BASE} 已存在, 跳过 mkdir")
 
-    remote_path = f"{REMOTE_BASE}/{LOCAL_FILE}"
-    print(f"  上传 {LOCAL_FILE} -> {remote_path} ...", end=" ", flush=True)
-    try:
-        sftp.put(local_path, remote_path)
-        print("OK")
-    except Exception as e:
-        print(f"FAIL: {e}")
-        sftp.close()
-        client.close()
-        sys.exit(1)
+    for local_path, filename in pending:
+        upload_with_verify(client, sftp, local_path, filename)
 
     sftp.close()
-
-    # Server-side md5 verify
-    print(f"\n=== [5/5] Server-side md5 verify (cross-source) ===")
-    stdin, stdout, stderr = client.exec_command(f"md5sum '{remote_path}'")
-    line = stdout.readline().strip()
-    if not line:
-        err = stderr.read().decode("utf-8", errors="ignore")
-        print(f"  [ERR] md5sum 输出为空: {err}")
-        client.close()
-        sys.exit(1)
-    server_md5 = line.split()[0].upper()
-    server_size_field = line.split()[1] if len(line.split()) >= 2 else "?"
-    print(f"  server md5:    {server_md5}")
-    print(f"  server size:   {server_size_field}")
-    print(f"  local  md5:    {local_md5}")
-    if server_md5 == local_md5:
-        print(f"  match:         OK (md5 cross-source verified)")
-    else:
-        print(f"  match:         MISMATCH (FAIL) — server md5 != local md5")
-        client.close()
-        sys.exit(1)
-
-    # Server-side size check (冗余)
-    stdin, stdout, stderr = client.exec_command(f"stat -c '%s' '{remote_path}'")
-    server_stat_size = stdout.readline().strip()
-    if server_stat_size == str(local_size):
-        print(f"  size  check:   OK ({server_stat_size} == {local_size})")
-    else:
-        print(f"  size  check:   MISMATCH (server {server_stat_size} != local {local_size})")
-        client.close()
-        sys.exit(1)
-
     client.close()
 
-    print(f"\n[DONE] {LOCAL_FILE} 已上传到 {remote_path}")
-    print(f"       公开 URL: https://www.aiec.fun/weavepage/{LOCAL_FILE}")
+    print(f"\n[DONE] {len(pending)} 个文件全部上传到 {REMOTE_BASE}")
+    for _, filename in pending:
+        print(f"       公开 URL: https://www.aiec.fun/weavepage/{filename}")
 
 
 if __name__ == "__main__":

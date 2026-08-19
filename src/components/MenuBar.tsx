@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-type MenuId = "file" | "view" | "recent" | null;
+type MenuId = "file" | "view" | "help" | "recent" | null;
 type ThemeMode = "system" | "light" | "dark";
 type ViewMode = "page" | "wide";
 export type RibbonTab = "edit" | "insert";
@@ -29,6 +29,8 @@ interface MenuBarProps {
   onToggleRibbon: () => void;
   activeTab: RibbonTab;
   onTabChange: (t: RibbonTab) => void;
+  // 关于
+  onAbout: () => void;
 }
 
 export function MenuBar(props: MenuBarProps) {
@@ -39,6 +41,7 @@ export function MenuBar(props: MenuBarProps) {
     viewMode, onViewMode, theme, onThemeChange,
     ribbonCollapsed, onToggleRibbon,
     activeTab, onTabChange,
+    onAbout,
   } = props;
   const [activeMenu, setActiveMenu] = useState<MenuId>(null);
   // 二级子菜单(目前只有「打开最近」用);hover 打开,mouseleave 关闭
@@ -189,6 +192,17 @@ export function MenuBar(props: MenuBarProps) {
             <button onClick={() => { onToggleRibbon(); close(); }}>
               {ribbonCollapsed ? "展开功能区" : "折叠功能区"}
             </button>
+          </div>
+        )}
+      </div>
+
+      <div className="menu-item menu-item-right">
+        <button className={`menu-title ${activeMenu === "help" ? "menu-open" : ""}`} onClick={() => toggle("help")}>
+          帮助
+        </button>
+        {activeMenu === "help" && (
+          <div className="menu-dropdown">
+            <button onClick={() => { onAbout(); close(); }}>关于 WeavePage...</button>
           </div>
         )}
       </div>
