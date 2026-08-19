@@ -14,6 +14,10 @@
   打开任意 HTML 文件，立即呈现完整的 CSS 样式与 JS 动态效果。<b>编辑界面就是最终效果。</b>
 </p>
 
+<p align="center">
+  <img src="assets/poster.jpg" alt="WeavePage 织页" />
+</p>
+
 ---
 
 ## What is WeavePage?
@@ -73,7 +77,7 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ## 🚀 安装
 
-1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_0.1.2_x64-setup.exe`
+1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_0.1.3_x64-setup.exe`
 2. 双击安装（自动安装 WebView2 运行时，全程无需联网）
 3. 从开始菜单启动 **WeavePage**
 
@@ -82,14 +86,14 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 ### 🔐 校验
 
 ```
-# NSIS 安装包 (~208 MB)
-sha256: 447313ac7a3f5fd5f0d61c69e97b56775dec81f618a7d575049dd6f491988555
+# NSIS 安装包 (~209 MB)
+sha256: b18976fc5ed781a3ca20bd9d561893d175a2f676303157f359cb2d08795ce13d
 
-# MSI 安装包 (~206 MB)
-sha256: 4fc0170eb3928dbf48b42cefb4a8f74951026f40abe1023435a6c3f800f84b15
+# MSI 安装包 (~208 MB)
+sha256: 51006b5f03b68e8f7cf311153c0b030069b2c18fa1a953fc927cf7f18d37c172
 ```
 
-Windows 验证：`certutil -hashfile WeavePage_0.1.2_x64-setup.exe SHA256`
+Windows 验证：`certutil -hashfile WeavePage_0.1.3_x64-setup.exe SHA256`
 
 ## 📖 使用指南
 

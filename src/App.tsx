@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
+import type { EditorEvents } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { TextStyle } from "@tiptap/extension-text-style";
 import Color from "@tiptap/extension-color";
@@ -31,6 +32,14 @@ import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
 import { AboutDialog } from "./components/AboutDialog";
 import { EditorContextMenu } from "./components/EditorContextMenu";
+import { TocFloating } from "./components/TocFloating";
+import {
+  scanTocEntries,
+  regenDocToc,
+  enableDocToc,
+  disableDocToc,
+  type TocEntry,
+} from "./utils/tocGen";
 import { formatHtml } from "./utils/formatHtml";
 import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
 import { loadRecentColors, pushRecentColor } from "./utils/recentColors";
@@ -50,6 +59,8 @@ import {
   blockTypeToSelector,
 } from "./utils/defaultStyle";
 import { applyBodyBackground } from "./utils/headShell";
+import { TOC_STYLES } from "./utils/tocStyles";
+import { TOC_FLOATING_SCRIPT } from "./utils/tocFloatingScript";
 import "./App.css";
 
 const THEME_KEY = "tiptap-theme";
@@ -273,6 +284,138 @@ function App() {
     if (editor) setWordCount(editor.getText().replace(/\s+/g, "").length);
   }, [editor]);
 
+  // ---- TOC(目录):状态 + regen 调度 ----
+  // tocEnabled 从 DocState 派生 — 随 activeId 切换而切换,不需要单独 state
+  const tocEnabled = activeDoc.tocEnabled === true;
+  const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);
+  const regenPendingRef = useRef(false);
+  const regenTimerRef = useRef<number | null>(null);
+  // regen 自身会 dispatch 事务(删除旧 nav + 重插新 nav),必须屏蔽这些事务再次触发
+  // scheduleRegen,否则 regen → transaction → schedule → regen 会无限自激
+  const regenRunningRef = useRef(false);
+
+  const refreshTocEntries = useCallback(() => {
+    if (!editor || !tocEnabled) {
+      setTocEntries([]);
+      return;
+    }
+    setTocEntries(scanTocEntries(editor));
+  }, [editor, tocEnabled]);
+
+  // 立即重建 nav(带自激保护);无 pending 时不动文档,避免离焦/保存把干净文档标脏
+  const flushRegen = useCallback(() => {
+    if (regenTimerRef.current) {
+      clearTimeout(regenTimerRef.current);
+      regenTimerRef.current = null;
+    }
+    if (!editor || !tocEnabled || !regenPendingRef.current) return;
+    regenPendingRef.current = false;
+    regenRunningRef.current = true;
+    try {
+      regenDocToc(editor);
+    } finally {
+      regenRunningRef.current = false;
+    }
+    refreshTocEntries();
+  }, [editor, tocEnabled, refreshTocEntries]);
+
+  const scheduleRegen = useCallback(() => {
+    if (!editor || !tocEnabled) return;
+    regenPendingRef.current = true;
+    if (regenTimerRef.current) clearTimeout(regenTimerRef.current);
+    regenTimerRef.current = window.setTimeout(() => {
+      regenTimerRef.current = null;
+      flushRegen();
+    }, 400);
+  }, [editor, tocEnabled, flushRegen]);
+
+  // 切文档 / 关文档 / 新建 / 写盘前:把待办 regen 落地,保证快照与磁盘内容含最新目录
+  const flushBeforeSwitch = useCallback(() => {
+    if (regenTimerRef.current) {
+      clearTimeout(regenTimerRef.current);
+      regenTimerRef.current = null;
+    }
+    if (!regenPendingRef.current) return;
+    regenPendingRef.current = false;
+    if (!editor) return;
+    regenRunningRef.current = true;
+    try {
+      regenDocToc(editor);
+    } finally {
+      regenRunningRef.current = false;
+    }
+  }, [editor]);
+
+  // 编辑事件:docChanged → debounce 400ms;光标离开标题 / 编辑区失焦 → 立即 flush
+  useEffect(() => {
+    if (!editor || !tocEnabled) return;
+    const onTransaction = ({ transaction }: EditorEvents["transaction"]) => {
+      if (regenRunningRef.current) return; // regen 自身产生的事务,忽略
+      if (!transaction.docChanged) return;
+      scheduleRegen();
+    };
+    const onSelectionUpdate = () => {
+      if (!regenPendingRef.current) return;
+      const $head = editor.state.selection.$head;
+      let inHeading = false;
+      for (let d = $head.depth; d > 0; d--) {
+        if ($head.node(d).type.name === "heading") {
+          inHeading = true;
+          break;
+        }
+      }
+      // 还在标题里说明用户仍在改标题,等 debounce;离开标题立即落地
+      if (!inHeading) flushRegen();
+    };
+    const onBlur = () => flushRegen();
+    const dom = editor.view.dom;
+    editor.on("transaction", onTransaction);
+    editor.on("selectionUpdate", onSelectionUpdate);
+    dom.addEventListener("blur", onBlur);
+    return () => {
+      editor.off("transaction", onTransaction);
+      editor.off("selectionUpdate", onSelectionUpdate);
+      dom.removeEventListener("blur", onBlur);
+    };
+  }, [editor, tocEnabled, scheduleRegen, flushRegen]);
+
+  // ---- 启用 / 移除目录(Ribbon「📑 目录」按钮) ----
+  const onToggleToc = useCallback(() => {
+    if (!editor) return;
+    // 丢弃旧调度:目录状态即将整体重建,pending 的 debounce 没有意义
+    if (regenTimerRef.current) {
+      clearTimeout(regenTimerRef.current);
+      regenTimerRef.current = null;
+    }
+    regenPendingRef.current = false;
+    regenRunningRef.current = true;
+    try {
+      if (tocEnabled) {
+        disableDocToc(editor);
+        updateActiveDoc({ tocEnabled: false });
+        setTocEntries([]);
+      } else {
+        setTocEntries(enableDocToc(editor));
+        updateActiveDoc({ tocEnabled: true });
+      }
+    } finally {
+      regenRunningRef.current = false;
+    }
+  }, [editor, tocEnabled, updateActiveDoc]);
+
+  // 切换文档后刷新浮动目录数据(applyDoc 已同步把新内容灌进编辑器)
+  useEffect(() => {
+    refreshTocEntries();
+  }, [activeId, refreshTocEntries]);
+
+  // 卸载时清掉悬空定时器
+  useEffect(
+    () => () => {
+      if (regenTimerRef.current) clearTimeout(regenTimerRef.current);
+    },
+    []
+  );
+
   // ---- 把当前编辑状态写回活动文档 ----
   const snapshotActive = useCallback((): DocState[] => {
     const cur = docs.find((d) => d.id === activeId);
@@ -313,6 +456,7 @@ function App() {
   const switchDoc = useCallback(
     (id: number) => {
       if (id === activeId || !editor) return;
+      flushBeforeSwitch(); // 先把待办目录重建落地,再快照
       const updated = snapshotActive();
       setDocs(updated);
       const target = updated.find((d) => d.id === id);
@@ -320,13 +464,14 @@ function App() {
       setActiveId(id);
       applyDoc(target);
     },
-    [activeId, editor, snapshotActive, applyDoc]
+    [activeId, editor, snapshotActive, applyDoc, flushBeforeSwitch]
   );
 
   // ---- 关闭标签 ----
   const closeDoc = useCallback(
     (id: number) => {
       if (!editor) return;
+      flushBeforeSwitch(); // 关闭前落地待办目录重建
       if (docs.length <= 1) {
         // 最后一个标签：重置为空白文档
         const doc = emptyDoc(id);
@@ -345,12 +490,13 @@ function App() {
         setDocs(remaining);
       }
     },
-    [docs, activeId, editor, applyDoc]
+    [docs, activeId, editor, applyDoc, flushBeforeSwitch]
   );
 
   // ---- 新建标签 ----
   const newDoc = useCallback(() => {
     if (!editor) return;
+    flushBeforeSwitch(); // 新建前落地待办目录重建,避免快照丢掉最新 nav
     const updated = snapshotActive();
     const id = idRef.current++;
     const doc = emptyDoc(id);
@@ -364,7 +510,7 @@ function App() {
     setFilePath(null);
     setIsModified(false);
     setWordCount(0);
-  }, [editor, snapshotActive]);
+  }, [editor, snapshotActive, flushBeforeSwitch]);
 
   // ---- 解析原始 HTML：内联外部资源，提取外壳与完整文档 ----
   const parseShell = useCallback(
@@ -683,6 +829,7 @@ ${sh.styles}
     async (path: string) => {
       const doc = docs.find((d) => d.id === activeId);
       if (!doc || !editor) return;
+      flushBeforeSwitch(); // 写盘前落地待办目录重建,保证磁盘内容含最新 nav
       let content: string;
       if (doc.kind === "text") {
         content = doc.body;
@@ -710,7 +857,7 @@ ${sh.styles}
         }
       }
     },
-    [docs, activeId, editor, mode, sourceText, buildFullDoc, shell, updateActiveDoc, syncFromSource]
+    [docs, activeId, editor, mode, sourceText, buildFullDoc, shell, updateActiveDoc, syncFromSource, flushBeforeSwitch]
   );
 
   const saveFile = useCallback(async () => {
@@ -1075,11 +1222,14 @@ ${sh.styles}
   if (!editor) return null;
 
   const viewClass = viewMode === "page" ? "editor-page" : "editor-wide";
-  const previewDoc =
-    (rawFullDoc ?? buildFullDoc(editor.getHTML(), shell)).replace(
-      /<\/body>/i,
-      PREVIEW_EDIT_SCRIPT + "</body>"
-    );
+  const basePreview = (rawFullDoc ?? buildFullDoc(editor.getHTML(), shell));
+  const tocInject = tocEnabled
+    ? TOC_STYLES + "\n" + TOC_FLOATING_SCRIPT + "\n"
+    : "";
+  const previewDoc = basePreview.replace(
+    /<\/body>/i,
+    tocInject + PREVIEW_EDIT_SCRIPT + "</body>"
+  );
   const isTextDoc = activeDoc.kind === "text";
   const shownWordCount = isTextDoc ? activeDoc.body.length : wordCount;
 
@@ -1141,6 +1291,9 @@ ${sh.styles}
         onColorUsed={onColorUsed}
         onSpacingChange={handleSpacingChange}
         onPageBgChange={handlePageBg}
+        tocEnabled={tocEnabled}
+        onToggleToc={onToggleToc}
+        tocDisabled={mode !== "edit" || isTextDoc}
       />
 
       {/* 主区域：侧边栏 + 内容 */}
@@ -1195,6 +1348,10 @@ ${sh.styles}
                 <style>{scopedCss(shell.headCss)}</style>
               )}
               <EditorContent editor={editor} />
+              {/* 浮动目录按钮 + 悬浮面板(portal 到 body,仅编辑模式) */}
+              {mode === "edit" && (
+                <TocFloating editor={editor} entries={tocEntries} enabled={tocEnabled} />
+              )}
             </div>
           )}
         </div>
