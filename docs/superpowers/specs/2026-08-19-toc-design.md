@@ -14,8 +14,9 @@
 4. 在页面右上角常驻一个「📑」悬浮按钮,hover 展开导航面板
 5. 鼠标悬停某个 h2 时,若有 h3 子标题,向左弹出 h3 子菜单
 6. 点击任一目录项 → 平滑滚动到对应标题位置
-7. 编辑模式下 + 网页预览(iframe)模式下都要可见可用
-8. 用户编辑/删除/重命名标题后,**离开光标**时自动重生成目录
+7. 鼠标离开插入的目录区域 → 目录自动收紧变为「目录」标题状态(默认折叠,hover 才展开全列表)
+8. 编辑模式下 + 网页预览(iframe)模式下都要可见可用
+9. 用户编辑/删除/重命名标题后,**离开光标**时自动重生成目录
 
 ## 2. 设计决定(澄清会产出)
 
@@ -60,6 +61,13 @@
 - `src/components/TocFloating.tsx` — 编辑模式悬浮 React 组件
 - `src/utils/tocStyles.ts` — 注入到 iframe 的 CSS 字符串常量
 - `src/utils/tocFloatingScript.ts` — 注入到 iframe 的悬浮 JS 字符串
+
+**目录默认折叠语义**(目标 #7):
+- 文档首插入的 `<nav class="doc-toc">` 默认只显示「目录 ▾」标题行,折叠隐藏下面的 `<ul>` 列表
+- 鼠标 hover nav 区域(标题行 + 展开的列表)→ 展开全列表
+- 鼠标离开整个 nav 区域 → 250ms 延迟后自动折叠回「目录 ▾」(给用户滑动到列表项的时间)
+- 右上角悬浮按钮默认只显示 📑 圆形按钮,hover 展开面板后,鼠标离开整个按钮+面板 → 收起
+- 编辑模式 / 预览模式 一致
 
 **修改文件清单**:
 - `src/components/RibbonInsert.tsx` — 新增「📑 目录」按钮组 + 状态
@@ -226,9 +234,12 @@ ${tocStyles}              /* <style>...</style>,含 .doc-toc / .wp-toc-floating 
   // 1. 创建 <button class="wp-toc-floating">📑</button>
   // 2. 创建 <div class="wp-toc-floating-panel">…</div>
   // 3. 扫描 document.querySelectorAll('h2, h3'),渲染嵌套 ul
-  // 4. hover 按钮 200ms 展开面板;hover 项 → 左弹 h3 子菜单
+  // 4. hover 按钮 + 面板(共享 hover 区域,250ms 延迟)→ 展开面板;
+  //    hover 项 → 左弹 h3 子菜单;
+  //    mouseleave 整个区域 → 250ms 后折叠回按钮
   // 5. 点击项 → document.getElementById(id).scrollIntoView({behavior:'smooth'})
   // 6. IntersectionObserver 监听当前可见 h2/h3,加 .is-current 类
+  // 7. 同样把已有 <nav class="doc-toc"> 加上 hover 离开折叠行为(若 CSS 已有则跳过)
 })();
 ```
 
@@ -259,10 +270,41 @@ interface TocFloatingProps {
 ## 8. CSS 样式
 
 ```css
-/* 文档内目录(可见,默认展开) */
-.doc-toc { margin: 0 0 1.5em; padding: 1em 1.2em; background: var(--bg-soft); border-radius: 6px; }
-.doc-toc-title { font-weight: 600; margin-bottom: .6em; color: var(--text-2); }
+/* 文档内目录(默认折叠,显示「目录 ▾」一行;hover nav 区域展开) */
+.doc-toc {
+  margin: 0 0 1.5em;
+  padding: 0;                         /* 折叠时不占空间 */
+  background: var(--bg-soft);
+  border-radius: 6px;
+  display: inline-block;              /* 折叠时只占标题宽度 */
+  min-width: 80px;
+  position: relative;                  /* hover 区域锚点 */
+}
+.doc-toc-title {
+  font-weight: 600;
+  color: var(--text-2);
+  padding: .5em .9em;
+  cursor: pointer;
+  user-select: none;
+}
+.doc-toc-title::after {
+  content: "▾";
+  margin-left: .4em;
+  display: inline-block;
+  transition: transform .15s ease;
+}
+.doc-toc.is-open .doc-toc-title::after { transform: rotate(180deg); }
+
+/* 折叠时隐藏列表;hover 整个 nav 或加 .is-open 类时显示 */
+.doc-toc-list-wrap {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height .2s ease;
+}
+.doc-toc:hover .doc-toc-list-wrap,
+.doc-toc.is-open .doc-toc-list-wrap { max-height: 60vh; overflow-y: auto; }
 .doc-toc-list, .doc-toc-list ul { list-style: none; padding-left: 0; margin: 0; }
+.doc-toc-list { padding: 0 .9em .6em; }
 .doc-toc-list ul { padding-left: 1.2em; margin-top: .2em; }
 .doc-toc-h2 { display:block; padding: .15em 0; color: var(--link); text-decoration:none; }
 .doc-toc-h3 { display:block; padding: .1em 0; color: var(--text-2); font-size:.92em; text-decoration:none; }
@@ -336,6 +378,9 @@ function uniqueSlug(base: string, taken: Set<string>): string {
 | 预览模式 | 不渲染 React 悬浮按钮;iframe 内由注入脚本渲染 |
 | 用户清空文档(全删) | regen 检测到 0 个标题 → 删除 `<nav class="doc-toc">` |
 | 标题节点被嵌套(如 h2 内含 h3 mark) | 扫描时只取 block-level heading,不会被嵌套 |
+| 鼠标 hover 文档首 nav 区域 → 展开列表;鼠标离开整个 nav | 250ms 延迟后折叠回「目录 ▾」标题(防抖,允许鼠标滑到列表项时仍保持展开) |
+| 鼠标 hover 右上角悬浮按钮 → 展开面板;鼠标离开按钮+面板 | 250ms 延迟后折叠回小按钮 |
+| iframe 内悬浮按钮 hover 离开 | 同编辑模式,250ms 延迟后折叠 |
 
 ## 11. DocState 字段变更
 
@@ -373,6 +418,12 @@ interface DocState {
 10. **切换 tab/文档** → 当前 doc 的 tocEnabled 保留
 11. **保存后重开文件** → 已存在的 `<nav class="doc-toc">` → tocEnabled 自动推断为 true → 浮动按钮自动出现
 12. **「移除目录」** → 文档首 nav 删除 + 所有 heading `id` 清空 + 浮动按钮消失
+13. **默认折叠行为**(目标 #7):
+    - 文档首 nav 默认只显示「目录 ▾」标题行,列表区 max-height:0 折叠
+    - hover 整个 nav → 列表展开(▾ 旋转 180°)
+    - 鼠标离开整个 nav → 250ms 后折叠
+    - 右上角悬浮按钮默认只显示圆形按钮;hover 展开面板;离开整个按钮+面板 250ms 后折叠回圆形按钮
+    - iframe 内同样的 hover 行为(由注入脚本实现)
 
 ## 13. 不在本次范围
 
