@@ -12,6 +12,9 @@ interface RibbonInsertProps {
   onInsertImage: () => void;
   onInsertTable: (rows: number, cols: number) => void;
   onDeleteTable: () => void;
+  tocEnabled: boolean;       // 当前文档是否启用 TOC
+  onToggleToc: () => void;   // 切换 enable/disable(由 App.tsx 实现)
+  tocDisabled: boolean;      // 文本 doc / source 模式禁用
 }
 
 export function RibbonInsert({
@@ -19,6 +22,9 @@ export function RibbonInsert({
   onInsertImage,
   onInsertTable,
   onDeleteTable,
+  tocEnabled,
+  onToggleToc,
+  tocDisabled,
 }: RibbonInsertProps) {
   // 光标移入/移出表格时实时刷新行列按钮可用状态
   const inTable = useEditorState({
@@ -84,6 +90,21 @@ export function RibbonInsert({
           icon="—"
           label="水平线"
           onClick={() => editor.chain().focus().setHorizontalRule().run()}
+        />
+      </div>
+
+      {/* 目录组 */}
+      <div className="ribbon-group">
+        <GroupTitle>目录</GroupTitle>
+        <RibbonButton
+          icon="📑"
+          label={tocEnabled ? "移除目录" : "目录"}
+          onClick={onToggleToc}
+          active={tocEnabled}
+          disabled={tocDisabled}
+          title={tocEnabled
+            ? "移除文档首插入的目录和锚点"
+            : "扫描 h2/h3 标题,生成目录并添加锚点"}
         />
       </div>
     </>

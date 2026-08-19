@@ -26,6 +26,9 @@ interface RibbonProps {
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
   // RibbonHome 页面背景色回调(由 App.tsx 写到 shell.headCss)
   onPageBgChange: (hex: string) => void;
+  tocEnabled: boolean;
+  onToggleToc: () => void;
+  tocDisabled: boolean;
 }
 
 export function Ribbon(props: RibbonProps) {
@@ -56,6 +59,9 @@ export function Ribbon(props: RibbonProps) {
               onInsertImage={props.onInsertImage}
               onInsertTable={props.onInsertTable}
               onDeleteTable={props.onDeleteTable}
+              tocEnabled={props.tocEnabled}
+              onToggleToc={props.onToggleToc}
+              tocDisabled={props.tocDisabled}
             />
           )}
         </div>
