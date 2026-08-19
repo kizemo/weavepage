@@ -211,13 +211,9 @@ export function enableDocToc(editor: Editor): TocEntry[] {
   const entries = scanTocEntries(editor);
   const dom = editor.view.dom as HTMLElement;
   assignHeadingIds(dom, entries);
-  if (entries.length === 0) {
-    // 即便没标题,插入空提示 nav 让用户能看到「目录」存在
-    insertDocToc(editor, buildDocTocHtml(entries));
-  } else {
-    removeDocToc(editor);
-    insertDocToc(editor, buildDocTocHtml(entries));
-  }
+  // 幂等:无论 entries 是否为空,先 removeDocToc 再 insert — 防止重复调用 enableDocToc 时 nav 堆叠
+  removeDocToc(editor);
+  insertDocToc(editor, buildDocTocHtml(entries));
   return entries;
 }
 
