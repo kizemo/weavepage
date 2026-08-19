@@ -159,3 +159,13 @@ test("clearHeadingIds 只清 wp-toc- 前缀", () => {
   assert.equal(root.querySelectorAll("h2")[0]!.id, "");
   assert.equal(root.querySelectorAll("h2")[1]!.id, "custom-id");
 });
+
+test("assignHeadingIds 与 scanHeadings index 对齐(空标题不偏移)", () => {
+  const root = makeDom("<h2></h2><h2>Real</h2><h3>Sub</h3><h2></h2><h2>Last</h2>");
+  const entries = scanHeadings(root);
+  assignHeadingIds(root, entries);
+  assert.equal(root.querySelectorAll("h2")[1]!.id, "wp-toc-real");
+  assert.equal(root.querySelectorAll("h3")[0]!.id, "wp-toc-sub");
+  assert.equal(root.querySelectorAll("h2")[3]!.id, "wp-toc-last");
+  assert.equal(entries.length, 3);
+});

@@ -118,7 +118,10 @@ export function buildDocTocHtml(entries: TocEntry[]): string {
 }
 
 export function assignHeadingIds(root: HTMLElement, entries: TocEntry[]): void {
-  const nodes = Array.from(root.querySelectorAll("h2, h3"));
+  // 必须与 scanHeadings 同步过滤空 textContent 标题(否则 index 错位)
+  const nodes = Array.from(root.querySelectorAll("h2, h3")).filter(
+    (el) => (el.textContent ?? "").trim() !== ""
+  );
   entries.forEach((e, i) => {
     const el = nodes[i];
     if (!el) return;
