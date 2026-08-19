@@ -116,3 +116,21 @@ export function buildDocTocHtml(entries: TocEntry[]): string {
     `</nav>`
   );
 }
+
+export function assignHeadingIds(root: HTMLElement, entries: TocEntry[]): void {
+  const nodes = Array.from(root.querySelectorAll("h2, h3"));
+  entries.forEach((e, i) => {
+    const el = nodes[i];
+    if (!el) return;
+    if (el.id !== e.id) {
+      if (e.id) el.setAttribute("id", e.id);
+      else el.removeAttribute("id");
+    }
+  });
+}
+
+export function clearHeadingIds(root: HTMLElement): void {
+  root.querySelectorAll("h2, h3").forEach((el) => {
+    if (el.id.startsWith("wp-toc-")) el.removeAttribute("id");
+  });
+}

@@ -126,3 +126,36 @@ test("buildDocTocHtml 默认折叠:list-wrap 在标题之后 + ▾ 字符", () =
   assert.match(html, /doc-toc-list-wrap/);
   assert.match(html, /▾|目录/);
 });
+
+import { assignHeadingIds, clearHeadingIds } from "./tocGen";
+
+test("assignHeadingIds 把 entry.id 写到对应 h2", () => {
+  const root = makeDom("<h2>A</h2><h2>B</h2>");
+  assignHeadingIds(root, [
+    { level: 2, text: "A", id: "wp-toc-a" },
+    { level: 2, text: "B", id: "wp-toc-b" },
+  ]);
+  const h2s = root.querySelectorAll("h2");
+  assert.equal(h2s[0]!.id, "wp-toc-a");
+  assert.equal(h2s[1]!.id, "wp-toc-b");
+});
+
+test("assignHeadingIds 已有同 id 时跳过", () => {
+  const root = makeDom('<h2 id="wp-toc-a">A</h2>');
+  // 监控 setAttribute 触发次数?简单做法:再调一次,不变化
+  assignHeadingIds(root, [{ level: 2, text: "A", id: "wp-toc-a" }]);
+  assert.equal(root.querySelector("h2")!.id, "wp-toc-a");
+});
+
+test("assignHeadingIds id 变化时覆盖", () => {
+  const root = makeDom('<h2 id="wp-toc-old">A</h2>');
+  assignHeadingIds(root, [{ level: 2, text: "A", id: "wp-toc-new" }]);
+  assert.equal(root.querySelector("h2")!.id, "wp-toc-new");
+});
+
+test("clearHeadingIds 只清 wp-toc- 前缀", () => {
+  const root = makeDom('<h2 id="wp-toc-a">A</h2><h2 id="custom-id">B</h2>');
+  clearHeadingIds(root);
+  assert.equal(root.querySelectorAll("h2")[0]!.id, "");
+  assert.equal(root.querySelectorAll("h2")[1]!.id, "custom-id");
+});
