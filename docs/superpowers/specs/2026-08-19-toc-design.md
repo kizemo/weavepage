@@ -144,7 +144,7 @@ function scanTocEntries(editor: Editor): TocEntry[]
 ```
 
 **`scanTocEntries` 的使用**:悬浮组件用 `useEditorState` 监听 editor.onUpdate/onSelectionUpdate,每 400ms 内最后一次调用,直接 scan DOM,渲染面板。**不写文档**。
-**`regenDocToc` 的使用**:用于"离焦重生成"——保存时/切换文档时/关闭文档前。
+**`regenDocToc` 的使用**:用于"离焦重生成"——`onBlur` / selection 离开标题节点 / debounce 到期 / 切文档前 / 关文档前 / save 写盘前。
 
 ### 5.6 一次性启用
 
@@ -160,12 +160,10 @@ function enableDocToc(editor: Editor): void
 ```ts
 // 现有:mode / editor / docs / activeId
 // 新增:
-const tocEnabledRef = useRef<Map<number, boolean>>(new Map());  // docId → enabled
-// 也可在 DocState 加 tocEnabled 字段(更持久)
-const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);   // 当前 doc 的条目
+const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);   // 当前 doc 的条目(由 scanTocEntries 实时算)
 ```
 
-**决策**:`tocEnabled` 加到 DocState(更直接),`tocEntries` 留在 App 状态。
+**决策**:`tocEnabled` 加到 DocState 字段(更直接,随文档切换自动恢复);`tocEntries` 留在 App 状态(每次 edit 切换文档时重算)。
 
 ### 6.2 调度 regen
 
@@ -181,12 +179,12 @@ const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);   // 当前 doc �
 // });
 ```
 
-**触发条件**:
-- `transaction.docChanged` → 设 `tocRegenPending` meta
-- `selectionUpdate` → 立即 flush
+**触发条件**(只在 `mode === 'edit'` 时生效):
+- `transaction.docChanged` 且当前光标在某标题节点 → 设 `tocRegenPending` meta
+- `selectionUpdate` 时,光标**离开**标题节点 → 立即 flush(若 pending)
 - 计时器 400ms 内无新 transaction → flush
-- `onBlur` → 立即 flush
-- `mode === 'preview'` → 立即 flush(让 iframe 看到最新)
+- `onBlur`(编辑器失焦)→ 立即 flush
+- 切文档前 / 关文档前 → 同步 flush(防止切换后 regen 写到错误的 editor 实例)
 
 ### 6.3 RibbonInsert 「📑 目录」按钮
 
@@ -207,16 +205,16 @@ const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);   // 当前 doc �
 
 ### 6.4 预览 srcDoc 注入
 
-`buildFullDoc` 后,在 `</body>` 前注入:
+`buildFullDoc` 后,在 `</body>` 前注入(沿用现有 `buildFullDoc` 的注入位置风格 — bodyScripts 之前):
 
 ```ts
 const TOC_PREVIEW_INJECT = `
-${tocStyles}              /* <style> with .doc-toc / .wp-toc-floating 前缀 */
+${tocStyles}              /* <style>...</style>,含 .doc-toc / .wp-toc-floating 前缀 */
 <script id="wp-toc-floating">${tocFloatingScript}</script>
 `;
 ```
 
-注入位置:`{sh.scripts}` 之前(避免被用户的脚本提前清掉)。
+注入位置:`{bodyHtml}` 之后 / `{sh.scripts}` 之前 — 先渲染目录的样式与悬浮脚本,再让用户脚本跑(脚本可覆盖)。
 
 ### 6.5 预览 iframe 中的悬浮 JS
 
