@@ -1,3 +1,5 @@
+import type { Editor } from "@tiptap/core";
+
 // slug 生成 + 去重 — 纯函数,不依赖 DOM/Tiptap
 export function slugify(text: string, index: number): string {
   const base = text
@@ -136,4 +138,91 @@ export function clearHeadingIds(root: HTMLElement): void {
   root.querySelectorAll("h2, h3").forEach((el) => {
     if (el.id.startsWith("wp-toc-")) el.removeAttribute("id");
   });
+}
+
+// ============================================================================
+// Tiptap 集成层(scanTocEntries / regenDocToc / enableDocToc / disableDocToc)
+// ============================================================================
+
+// 通过 ProseMirror 视图 DOM 找到 nav.doc-toc 节点;返回其 PM pos(若没有返回 null)
+const findDocTocPos = (editor: Editor): number | null => {
+  const dom = editor.view.dom as HTMLElement;
+  const navEl = dom.querySelector("nav.doc-toc");
+  if (!navEl) return null;
+  const pmView = editor.view;
+  try {
+    const pos = pmView.posAtDOM(navEl, 0);
+    return pos;
+  } catch {
+    return null;
+  }
+};
+
+// 删除 nav.doc-toc 节点(含其内容)
+const removeDocToc = (editor: Editor): boolean => {
+  const pos = findDocTocPos(editor);
+  if (pos == null) return false;
+  const $pos = editor.state.doc.resolve(pos);
+  // 找到包含 nav.doc-toc 的最高节点
+  let depth = $pos.depth;
+  let node = $pos.node(depth);
+  while (depth > 0) {
+    const el = editor.view.nodeDOM($pos.before(depth));
+    if (el === null || !(el instanceof HTMLElement)) break;
+    if (!el.classList.contains("doc-toc")) {
+      depth--;
+      node = $pos.node(depth);
+      continue;
+    }
+    break;
+  }
+  const from = $pos.before(depth);
+  const to = from + node.nodeSize;
+  editor.chain().focus().deleteRange({ from, to }).run();
+  return true;
+};
+
+const insertDocToc = (editor: Editor, html: string): void => {
+  editor.chain().focus().insertContentAt(0, html).run();
+};
+
+export function scanTocEntries(editor: Editor): TocEntry[] {
+  const dom = editor.view.dom as HTMLElement;
+  return scanHeadings(dom);
+}
+
+export function regenDocToc(editor: Editor): TocEntry[] {
+  const entries = scanTocEntries(editor);
+  // 写锚点
+  const dom = editor.view.dom as HTMLElement;
+  assignHeadingIds(dom, entries);
+  // 替换 nav
+  const html = buildDocTocHtml(entries);
+  removeDocToc(editor);
+  if (entries.length > 0) {
+    insertDocToc(editor, html);
+  } else {
+    // 空 nav 也不插入(只保留按钮提示),但仍然要 clear existing nav(removeDocToc 已做)
+  }
+  return entries;
+}
+
+export function enableDocToc(editor: Editor): TocEntry[] {
+  const entries = scanTocEntries(editor);
+  const dom = editor.view.dom as HTMLElement;
+  assignHeadingIds(dom, entries);
+  if (entries.length === 0) {
+    // 即便没标题,插入空提示 nav 让用户能看到「目录」存在
+    insertDocToc(editor, buildDocTocHtml(entries));
+  } else {
+    removeDocToc(editor);
+    insertDocToc(editor, buildDocTocHtml(entries));
+  }
+  return entries;
+}
+
+export function disableDocToc(editor: Editor): void {
+  removeDocToc(editor);
+  const dom = editor.view.dom as HTMLElement;
+  clearHeadingIds(dom);
 }
