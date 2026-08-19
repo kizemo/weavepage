@@ -94,6 +94,10 @@ export const TOC_FLOATING_SCRIPT = `<script id="wp-toc-floating">
   // 5. IntersectionObserver 高亮当前标题
   if ('IntersectionObserver' in window){
     var obs = new IntersectionObserver(function(items){
+      // ⚠️ FIX: clear all .is-current first to avoid multi-highlight
+      panel.querySelectorAll('.is-current').forEach(function(li){
+        li.classList.remove('is-current');
+      });
       items.forEach(function(it){
         var item = it.target;
         if (it.isIntersecting){
@@ -110,4 +114,4 @@ export const TOC_FLOATING_SCRIPT = `<script id="wp-toc-floating">
     document.querySelectorAll('h2, h3').forEach(function(h){ if (h.id) obs.observe(h); });
   }
 })();
-</script>`;
+<\/script>`;
