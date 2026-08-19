@@ -119,19 +119,33 @@ export function buildDocTocHtml(entries: TocEntry[]): string {
   );
 }
 
-export function assignHeadingIds(root: HTMLElement, entries: TocEntry[]): void {
+// 通过 PM transaction 把 entry.id 写回 node.attrs — 必须用 transaction,
+// 因为 PM 的 DOMObserver 不会反向同步 DOM 属性变更到 node state;
+// 直接 el.setAttribute 会导致 editor.getHTML() 仍输出旧 id(saved HTML / 预览锚点失效)
+export function assignHeadingIds(editor: Editor, root: HTMLElement, entries: TocEntry[]): void {
   // 必须与 scanHeadings 同步过滤空 textContent 标题(否则 index 错位)
   const nodes = Array.from(root.querySelectorAll("h2, h3")).filter(
     (el) => (el.textContent ?? "").trim() !== ""
   );
-  entries.forEach((e, i) => {
-    const el = nodes[i];
-    if (!el) return;
-    if (el.id !== e.id) {
-      if (e.id) el.setAttribute("id", e.id);
-      else el.removeAttribute("id");
-    }
-  });
+  editor.chain().focus().command(({ tr }) => {
+    entries.forEach((e, i) => {
+      const el = nodes[i];
+      if (!el) return;
+      try {
+        const pos = editor.view.posAtDOM(el, 0);
+        if (pos == null) return;
+        const node = tr.doc.nodeAt(pos);
+        if (!node) return;
+        if (node.attrs.id !== e.id) {
+          const newAttrs = { ...node.attrs, id: e.id || null };
+          tr.setNodeMarkup(pos, undefined, newAttrs);
+        }
+      } catch {
+        // posAtDOM can throw on detached DOM; skip silently
+      }
+    });
+    return true;
+  }).run();
 }
 
 export function clearHeadingIds(root: HTMLElement): void {
@@ -195,7 +209,7 @@ export function regenDocToc(editor: Editor): TocEntry[] {
   const entries = scanTocEntries(editor);
   // 写锚点
   const dom = editor.view.dom as HTMLElement;
-  assignHeadingIds(dom, entries);
+  assignHeadingIds(editor, dom, entries);
   // 替换 nav
   const html = buildDocTocHtml(entries);
   removeDocToc(editor);
@@ -210,7 +224,7 @@ export function regenDocToc(editor: Editor): TocEntry[] {
 export function enableDocToc(editor: Editor): TocEntry[] {
   const entries = scanTocEntries(editor);
   const dom = editor.view.dom as HTMLElement;
-  assignHeadingIds(dom, entries);
+  assignHeadingIds(editor, dom, entries);
   // 幂等:无论 entries 是否为空,先 removeDocToc 再 insert — 防止重复调用 enableDocToc 时 nav 堆叠
   removeDocToc(editor);
   insertDocToc(editor, buildDocTocHtml(entries));

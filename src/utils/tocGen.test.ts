@@ -128,29 +128,102 @@ test("buildDocTocHtml 默认折叠:list-wrap 在标题之后 + ▾ 字符", () =
 });
 
 import { assignHeadingIds, clearHeadingIds } from "./tocGen";
+import type { Editor } from "@tiptap/core";
 
-test("assignHeadingIds 把 entry.id 写到对应 h2", () => {
+// Mock Editor — 模拟 PM transaction 写入路径
+// assignHeadingIds 现在通过 editor.chain().focus().command(({ tr }) => ...).run()
+// 走 PM transaction,所以测试必须用 mock editor 记录 setNodeMarkup 调用
+function makeMockEditor(root: HTMLElement): {
+  editor: Editor;
+  ops: Array<{ pos: number; attrs: Record<string, unknown> }>;
+  getAttrsAt: (pos: number) => Record<string, unknown> | undefined;
+} {
+  const ops: Array<{ pos: number; attrs: Record<string, unknown> }> = [];
+  // 与 assignHeadingIds 同步过滤空 textContent 标题(否则 index 错位)
+  const nodes = Array.from(root.querySelectorAll("h2, h3")).filter(
+    (el) => (el.textContent ?? "").trim() !== ""
+  );
+  // 给每个非空 heading 分配唯一 pos;同时预填当前 attrs(从 DOM id 读)
+  const elToPos = new Map<HTMLElement, number>();
+  const attrsAtPos = new Map<number, Record<string, unknown>>();
+  nodes.forEach((el, i) => {
+    elToPos.set(el, i);
+    attrsAtPos.set(i, { id: el.id || null });
+  });
+
+  const mock = {
+    chain: () => ({
+      focus: () => ({
+        command: (cb: (args: { tr: unknown }) => void) => ({
+          run: () => {
+            const tr = {
+              doc: {
+                nodeAt: (pos: number) => {
+                  const attrs = attrsAtPos.get(pos);
+                  if (!attrs) return null;
+                  return { attrs: { ...attrs } };
+                },
+              },
+              setNodeMarkup: (pos: number, _type: unknown, attrs: Record<string, unknown>) => {
+                attrsAtPos.set(pos, { ...attrs });
+                ops.push({ pos, attrs: { ...attrs } });
+              },
+            };
+            cb({ tr });
+          },
+        }),
+      }),
+    }),
+    view: {
+      posAtDOM: (el: HTMLElement, _offset: number) => {
+        const pos = elToPos.get(el);
+        if (pos === undefined) {
+          // 模拟真实 PM 的行为 — detached / 找不到就抛错,让 try/catch 兜住
+          throw new Error("MockEditor.posAtDOM: element not registered");
+        }
+        return pos;
+      },
+    },
+  };
+
+  return {
+    editor: mock as unknown as Editor,
+    ops,
+    getAttrsAt: (pos) => {
+      const a = attrsAtPos.get(pos);
+      return a ? { ...a } : undefined;
+    },
+  };
+}
+
+test("assignHeadingIds 把 entry.id 通过 PM transaction 写到对应 h2", () => {
   const root = makeDom("<h2>A</h2><h2>B</h2>");
-  assignHeadingIds(root, [
+  const { editor, ops } = makeMockEditor(root);
+  assignHeadingIds(editor, root, [
     { level: 2, text: "A", id: "wp-toc-a" },
     { level: 2, text: "B", id: "wp-toc-b" },
   ]);
-  const h2s = root.querySelectorAll("h2");
-  assert.equal(h2s[0]!.id, "wp-toc-a");
-  assert.equal(h2s[1]!.id, "wp-toc-b");
+  assert.equal(ops.length, 2);
+  assert.equal(ops[0]!.attrs.id, "wp-toc-a");
+  assert.equal(ops[1]!.attrs.id, "wp-toc-b");
 });
 
-test("assignHeadingIds 已有同 id 时跳过", () => {
+test("assignHeadingIds 已有同 id 时跳过 (不发 transaction)", () => {
   const root = makeDom('<h2 id="wp-toc-a">A</h2>');
-  // 监控 setAttribute 触发次数?简单做法:再调一次,不变化
-  assignHeadingIds(root, [{ level: 2, text: "A", id: "wp-toc-a" }]);
-  assert.equal(root.querySelector("h2")!.id, "wp-toc-a");
+  const { editor, ops } = makeMockEditor(root);
+  assignHeadingIds(editor, root, [{ level: 2, text: "A", id: "wp-toc-a" }]);
+  // 关键断言:当 node.attrs.id === entry.id 时不应再 setNodeMarkup
+  assert.equal(ops.length, 0);
 });
 
-test("assignHeadingIds id 变化时覆盖", () => {
+test("assignHeadingIds id 变化时覆盖 (PM transaction 写新 attrs)", () => {
   const root = makeDom('<h2 id="wp-toc-old">A</h2>');
-  assignHeadingIds(root, [{ level: 2, text: "A", id: "wp-toc-new" }]);
-  assert.equal(root.querySelector("h2")!.id, "wp-toc-new");
+  const { editor, ops, getAttrsAt } = makeMockEditor(root);
+  assignHeadingIds(editor, root, [{ level: 2, text: "A", id: "wp-toc-new" }]);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0]!.attrs.id, "wp-toc-new");
+  // 关键断言:PM 节点 attrs 现在是新 id
+  assert.equal(getAttrsAt(0)?.id, "wp-toc-new");
 });
 
 test("clearHeadingIds 只清 wp-toc- 前缀", () => {
@@ -162,10 +235,34 @@ test("clearHeadingIds 只清 wp-toc- 前缀", () => {
 
 test("assignHeadingIds 与 scanHeadings index 对齐(空标题不偏移)", () => {
   const root = makeDom("<h2></h2><h2>Real</h2><h3>Sub</h3><h2></h2><h2>Last</h2>");
+  const { editor, ops } = makeMockEditor(root);
   const entries = scanHeadings(root);
-  assignHeadingIds(root, entries);
-  assert.equal(root.querySelectorAll("h2")[1]!.id, "wp-toc-real");
-  assert.equal(root.querySelectorAll("h3")[0]!.id, "wp-toc-sub");
-  assert.equal(root.querySelectorAll("h2")[3]!.id, "wp-toc-last");
+  assignHeadingIds(editor, root, entries);
   assert.equal(entries.length, 3);
+  // 3 个非空标题对应 3 次 setNodeMarkup,顺序与 scanHeadings 一致
+  assert.equal(ops.length, 3);
+  assert.equal(ops[0]!.attrs.id, "wp-toc-real");
+  assert.equal(ops[1]!.attrs.id, "wp-toc-sub");
+  assert.equal(ops[2]!.attrs.id, "wp-toc-last");
+});
+
+// 回归保护 — Task 12 review 发现的 load-bearing bug:
+// 直接 el.setAttribute("id", ...) 不会同步到 PM node.attrs,
+// 导致 editor.getHTML() 输出旧 id,saved HTML / 预览锚点失效。
+// 现在 assignHeadingIds 走 PM transaction.setNodeMarkup,
+// editor.getHTML() 拿到的就是新 id(等价于 mock 中 getAttrsAt(pos).id)。
+test("assignHeadingIds 修复回归:PM 节点 attrs 同步为新 id(等价于 getHTML 输出)", () => {
+  const root = makeDom('<h2 id="wp-toc-old">A</h2>');
+  const { editor, ops, getAttrsAt } = makeMockEditor(root);
+  // 模拟:scanHeadings 重新算 id(因为用户改了标题文本),
+  // 现在分配新 id "wp-toc-new",但 DOM 上的 id 仍是旧的
+  const newEntries = [{ level: 2 as const, text: "A updated", id: "wp-toc-new" }];
+  assignHeadingIds(editor, root, newEntries);
+  // 断言 1:发起了 PM transaction(关键路径)
+  assert.equal(ops.length, 1);
+  // 断言 2:PM node.attrs 现在是新 id — 这就是 editor.getHTML() 会序列化的内容
+  assert.equal(getAttrsAt(0)?.id, "wp-toc-new");
+  // 断言 3:与旧的 DOM-only 路径不同(el.setAttribute 不会反映到 node.attrs)
+  // — 这个测试如果回退到 setAttribute,getAttrsAt(0).id 仍是 "wp-toc-old"
+  assert.notEqual(getAttrsAt(0)?.id, "wp-toc-old");
 });
