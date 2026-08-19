@@ -6,12 +6,24 @@
 
 ---
 
-## 发布新版本（按顺序读 3 篇）
+## 发布新版本（按顺序读）
+
+### 强制规则：v0.1.11+ 起每次发版必须同时产出两个 exe
+
+| 完整包 (`*_x64-setup.exe`, ~210 MB) | 升级包 (`*_x64-update.exe`, ~5.5 MB) |
+|---|---|
+| 浏览器下载、新用户装机 | 应用内升级、老用户覆盖安装 |
+| 含 WebView2 离线包,首次安装不需联网 | 仅覆盖应用二进制,假设机器已有 WebView2 |
+
+**两个文件必须同时进 `release/`,同时上传,同时进 `version.json`**(`url` 指完整包,`update_url` 指升级包)。详见 [dual-channel-release.md](./dual-channel-release.md)。
+
+### 流程文档（按顺序读）
 
 | 顺序 | 文档 | 何时打开 |
 |---|---|---|
-| **1** | [release-workflow.md](./release-workflow.md) | 准备从源码构建新版本 NSIS 安装包时 |
-| **2** | [server-upload.md](./server-upload.md) | 构建完、需要把 exe 推上 aiec.fun/weavepage 时 |
+| **0** | [dual-channel-release.md](./dual-channel-release.md) | 第一次接触双渠道打包规则,或不确定 url / update_url 该指向哪个 exe |
+| **1** | [release-workflow.md](./release-workflow.md) | 准备从源码构建新版本(打两个 exe) |
+| **2** | [server-upload.md](./server-upload.md) | 构建完、需要把 setup.exe + update.exe 一起推上 aiec.fun/weavepage 时 |
 | **3** | [version-info.md](./version-info.md) | 上传完、需要更新 `version.json` 触发 app 自动更新时 |
 
 按这三步走完，新版本就上线了。
