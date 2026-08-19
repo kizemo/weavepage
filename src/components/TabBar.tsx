@@ -17,6 +17,7 @@ export interface DocState {
   } | null;
   rawFullDoc: string | null;
   resources: { path: string; name: string; kind: "css" | "js" }[];
+  tocEnabled?: boolean;  // 当前文档是否启用 TOC;默认 false;首次启用时由 App.tsx 设置
 }
 
 interface TabBarProps {
