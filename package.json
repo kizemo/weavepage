@@ -44,6 +44,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "linkedom": "^0.18.13",
     "tsx": "^4.23.12",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"

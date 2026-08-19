@@ -1,8 +1,9 @@
-// 单元测试:slug 生成 / 去重 / 边界
+// 单元测试:slug 生成 / 去重 / 边界 / DOM 扫描
 // 跑法:pnpm tsx src/utils/tocGen.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { slugify, uniqueSlug } from "./tocGen";
+import { slugify, uniqueSlug, scanHeadings, type TocEntry } from "./tocGen";
+import { makeDom } from "./testDom";
 
 test("slugify 中文保留", () => {
   assert.equal(slugify("第一节 标题", 1), "第一节-标题");
@@ -40,4 +41,39 @@ test("uniqueSlug 冲突加 -2 / -3", () => {
   const taken = new Set<string>(["foo"]);
   assert.equal(uniqueSlug("foo", taken), "foo-2");
   assert.equal(uniqueSlug("foo", taken), "foo-3");
+});
+
+test("scanHeadings 取 h2 / h3,跳过 h1/h4", () => {
+  const root = makeDom("<h1>ignore</h1><h2>A</h2><h3>a1</h3><h4>ignore</h4><h3>a2</h3><h2>B</h2>");
+  const out = scanHeadings(root);
+  assert.equal(out.length, 4);
+  assert.deepEqual(out.map(e => e.level), [2, 3, 3, 2]);
+  assert.equal(out[0]!.text, "A");
+});
+
+test("scanHeadings 跳过空 textContent", () => {
+  const root = makeDom("<h2></h2><h2>   </h2><h2>Real</h2>");
+  const out = scanHeadings(root);
+  assert.equal(out.length, 1);
+  assert.equal(out[0]!.text, "Real");
+});
+
+test("scanHeadings 重复标题 slug 去重", () => {
+  const root = makeDom("<h2>foo</h2><h2>foo</h2><h2>foo</h2>");
+  const out = scanHeadings(root);
+  assert.equal(out[0]!.id, "wp-toc-foo");
+  assert.equal(out[1]!.id, "wp-toc-foo-2");
+  assert.equal(out[2]!.id, "wp-toc-foo-3");
+});
+
+test("scanHeadings 中文标题保留", () => {
+  const root = makeDom("<h2>第一节</h2>");
+  const out = scanHeadings(root);
+  assert.equal(out[0]!.id, "wp-toc-第一节");
+});
+
+test("scanHeadings id 已有时不覆盖", () => {
+  const root = makeDom('<h2 id="custom">A</h2>');
+  const out = scanHeadings(root);
+  assert.equal(out[0]!.id, "custom");
 });
