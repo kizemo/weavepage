@@ -553,13 +553,15 @@ ${bodyStyles}
 
   // ---- 用内容 + 外壳重建完整 HTML ----
   const buildFullDoc = useCallback(
-    (bodyHtml: string, sh: DocShell | null): string => {
+    (bodyHtml: string, sh: DocShell | null, editable: boolean = false): string => {
       if (sh) {
         const base = sh.baseHref ? `<base href="${encodeURI(sh.baseHref)}">` : "";
+        // v0.1.13 第三十轮:editable 模式下 body 加 contenteditable=true,iframe 内可直接编辑
+        const bodyEditable = editable ? ' contenteditable="true"' : "";
         return `${sh.doctype}
 <html>
 <head>${base}${sh.head}</head>
-<body${sh.bodyAttrs}>
+<body${sh.bodyAttrs}${bodyEditable}>
 ${bodyHtml}
 ${sh.scripts}
 ${sh.styles}
@@ -567,6 +569,7 @@ ${sh.styles}
 </html>`;
       }
       const title = (filePath?.split("\\").pop() ?? "文档").replace(/\.html?$/, "");
+      const bodyEditable = editable ? ' contenteditable="true"' : "";
       return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -575,7 +578,7 @@ ${sh.styles}
 <title>${title}</title>
 <style>body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.7;max-width:794px;margin:0 auto;padding:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px}blockquote{border-left:3px solid #ccc;margin:0.5em 0;padding-left:1em;color:#666}pre{background:#f0f0f0;padding:1em;border-radius:6px;overflow-x:auto}code{background:#f0f0f0;padding:0.2em 0.4em;border-radius:3px}img{max-width:100%;height:auto}</style>
 </head>
-<body>${bodyHtml}</body>
+<body${bodyEditable}>${bodyHtml}</body>
 </html>`;
     },
     [filePath]
@@ -1141,7 +1144,27 @@ ${sh.styles}
   if (!editor) return null;
 
   const viewClass = viewMode === "page" ? "editor-page" : "editor-wide";
-  const basePreview = (rawFullDoc ?? buildFullDoc(editor.getHTML(), shell));
+
+  // v0.1.13 第三十轮:iframe-based 编辑器(MVP)
+  // docHtml 是 source of truth,从 Tiptap state 初始化
+  // iframe srcDoc = docHtml,内容编辑器(浏览器原生 HTML 解析 → 真正 WYSIWYG)
+  // iframe onInput → setDocHtml(用户编辑反馈)
+  // Tiptap 仍保留(setContent 用于 toolbar 操作 + save),但 view 层用 iframe
+  // 保留 TocFloating 仍按 v29 逻辑(基于 Tiptap 扫描 h2/h3 + 给 heading 设 id)
+  const [docHtml, setDocHtml] = useState<string>("<p></p>");
+
+  // 同步 Tiptap state 变化到 docHtml(初始 + editor.onUpdate)
+  useEffect(() => {
+    if (!editor) return;
+    setDocHtml(editor.getHTML());
+    const onUpdate = () => setDocHtml(editor.getHTML());
+    editor.on("update", onUpdate);
+    return () => {
+      editor.off("update", onUpdate);
+    };
+  }, [editor]);
+
+  const basePreview = (rawFullDoc ?? buildFullDoc(docHtml, shell));
   // v0.1.13 第二十六轮:TOC 由 TocFloating React Portal 渲染(只在编辑视图显示),
   // 预览 iframe 不再注入 TOC hover/click 处理脚本
   const previewDoc = basePreview.replace(
@@ -1265,17 +1288,28 @@ ${sh.styles}
               {activeDoc.kind === "html" && shell?.headCss && (
                 <style>{scopedCss(shell.headCss)}</style>
               )}
-              {/* v0.1.13 第二十九轮:TOC UI 双轨方案
-                  1. 编辑器视图:React Portal TocFloating(整段挂到 document.body,
-                     避开 .editor-body contenteditable + .ProseMirror 等祖先,
-                     让 wrap position: fixed 锁 viewport 真正生效)
-                  2. 预览 iframe:doc-toc atom 自身的 inline style(独立 document)
-                  3. 浏览器 export:doc-toc atom inline style
-                  4. doc-toc atom 仍存 tocHtml attr(可保存),只是编辑器视图视觉
-                     用 React UI(用 CSS 让 atom 在 editor view 隐藏,
-                     但 atom 数据保留,saved HTML 不受影响)
+              {/* v0.1.13 第三十轮:iframe-based 编辑器(MVP)
+                  - <EditorContent>(Tiptap PM view)替换为 <iframe srcDoc=docHtml contentEditable>
+                  - 浏览器原生 HTML 解析,所有 <style> <script> <button> 等都 WYSIWYG
+                  - iframe onInput → setDocHtml(用户编辑反馈,无需重建 iframe)
+                  - Tiptap 仍 work(setContent 用于 save + toolbar),但 view 层用 iframe
               */}
-              <EditorContent editor={editor} />
+              <iframe
+                key={activeDoc.id}
+                title="editor"
+                className="editor-iframe"
+                srcDoc={buildFullDoc(docHtml, shell, /* editable */ true)}
+                sandbox="allow-same-origin allow-scripts allow-forms"
+                onLoad={(e) => {
+                  // iframe load 完后绑定 onInput 监听(避免重建 iframe 丢失 focus)
+                  const iframe = e.currentTarget as HTMLIFrameElement;
+                  const doc = iframe.contentDocument;
+                  if (!doc) return;
+                  doc.body.addEventListener("input", () => {
+                    setDocHtml(doc.body.innerHTML);
+                  });
+                }}
+              />
               {/* v0.1.13 第二十九轮:WYSIWYG — React Portal TocFloating 只在 doc 含 doc-toc atom 时显示
                   html 不含 TOC → 编辑器内也不显示 TOC(跟浏览器打开一致) */}
               {mode === "edit" && activeDoc.kind === "html" && tocEnabled && (
