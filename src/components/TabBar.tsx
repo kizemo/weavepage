@@ -17,7 +17,10 @@ export interface DocState {
   } | null;
   rawFullDoc: string | null;
   resources: { path: string; name: string; kind: "css" | "js" }[];
-  tocEnabled?: boolean;  // 当前文档是否启用 TOC;默认 false;首次启用时由 App.tsx 设置
+  // v0.1.13 第二十七轮:TOC 改为 inline doc-toc atom 方案(可插入/删除)。
+  // 状态反映:加载 doc 时如果包含 doc-toc atom → tocEnabled = true。
+  // 用户点 Ribbon「插入/删除目录」按钮 → toggleToc。
+  tocEnabled?: boolean;
 }
 
 interface TabBarProps {

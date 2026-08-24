@@ -175,6 +175,8 @@ body {
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
+  /* v0.1.13 第十三轮:长文件名不换行(由父级 white-space:nowrap 继承) */
+  white-space: nowrap;
 }
 .menu-dropdown button:hover { background: var(--hover); }
 .menu-dropdown button:disabled { color: var(--text-dim); cursor: default; }
@@ -201,7 +203,10 @@ body {
   left: 100%;
   top: 0;
   margin-left: 2px;
-  min-width: 180px;
+  /* v0.1.13 第十三轮:放开最近子菜单宽度 + 禁止换行 —
+     文件名长(尖刀连_2026-08_final.html 等)不换行,跟一级菜单一致排在一行 */
+  min-width: 320px;
+  white-space: nowrap;
 }
 .menu-disabled {
   color: var(--text-dim);
@@ -649,12 +654,61 @@ body {
   text-align: center;
 }
 
+/* ============ TOC 目录(第二十八轮:inline style 兜底) ============ */
+/* v0.1.13 第二十八轮:doc-toc 的 CSS 主要用 inline style attribute。
+   这里保留一份全局 CSS 作为 WeavePage 编辑器内的兜底:
+   - inline style 一定生效(atom renderHTML 保留)
+   - 全局 CSS 防止 inline style 缺失时 wrap 不浮动
+   - 注意:不要 !important,让 inline style 优先(specificity 一致时后者覆盖)
+*/
+.doc-toc .wp-toc-floating-wrap {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 9999;
+  width: 280px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+.doc-toc .wp-toc-floating-panel {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #d0d8e0;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 48, 112, 0.18);
+  z-index: 1;
+}
+.doc-toc .wp-toc-h3-submenu {
+  position: absolute;
+  right: 288px;
+  background: #ffffff;
+  border: 1px solid #d0d8e0;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 48, 112, 0.18);
+  z-index: 2;
+}
+
 /* ============ 编辑区 ============ */
+/* v0.1.13 第二十九轮:编辑器视图内隐藏 doc-toc atom 视觉
+   - React Portal TocFloating 接管编辑器 UI(挂到 document.body)
+   - doc-toc atom 数据保留(可保存/可 undo),只是视觉隐藏
+   - 关键:这个 CSS 只作用域 .editor-body(编辑器视图容器),
+     不影响 saved HTML(导出/浏览器打开仍可见) */
+.editor-body .doc-toc {
+  display: none !important;
+}
+
+/* ============ 编辑区正式 ============ */
 .editor-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  /* v0.1.13 第八轮:去掉 overflow-x:hidden —
+     让 .wp-toc-floating-submenu 弹出到左侧时不被 editor-scroll 横向裁切。
+     副作用:文档内容(比如超宽表格/图片)若超出 editor-scroll 宽度会横向溢出;
+     但用户场景下页面模式 (max-width:794px) + 全宽模式都默认不溢出。 */
+  overflow-x: visible;
   background: var(--bg);
   /* 文档中 fixed 定位元素（转 absolute 后）以编辑容器为定位基准 */
   position: relative;
@@ -1038,20 +1092,30 @@ body {
 }
 
 /* ============ TOC 目录 ============ */
+/* ---------- 文档内 inline TOC(docToc atom 节点) ---------- */
 .doc-toc {
-  margin: 0 0 1.5em;
+  /* 第二十轮:display: block(关键 fix!)—
+     之前 inline-block 只占 80px,在 doc body 左侧;
+     block 让 doc-toc 撑满 doc body 宽度,wrap 的 right:12 才真正在 doc body 右边缘 */
+  display: block;
+  margin: 0 0 1.2em;
   padding: 0;
-  background: var(--bg-soft);
-  border-radius: 6px;
-  display: inline-block;
-  min-width: 80px;
   position: relative;
+  /* wrap 是 absolute 脱离 doc-toc flow;doc-toc 自身高度 = 0,
+     加 min-height:1px 让 doc-toc 在 doc body 流里最少占 1px,
+     避免 wrap 在 doc 第一行变成 0 高度元素导致正文上移 */
+  min-height: 1px;
+  /* 透明背景 — 视觉效果由 wrap 内的 button 提供 */
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  /* 不需要 vertical-align:block 没意义 */
 }
 .doc-toc-title {
   font-weight: 600;
-  color: var(--text-2);
+  color: var(--text);
   padding: .5em .9em;
-  cursor: pointer;
+  cursor: default;
   user-select: none;
 }
 .doc-toc-title::after {
@@ -1059,8 +1123,9 @@ body {
   margin-left: .4em;
   display: inline-block;
   transition: transform .15s ease;
+  opacity: .7;
 }
-.wp-toc-floating-wrap.is-open .doc-toc-title::after,
+.doc-toc:hover .doc-toc-title::after,
 .doc-toc.is-open .doc-toc-title::after { transform: rotate(180deg); }
 .doc-toc-list-wrap {
   max-height: 0;
@@ -1085,43 +1150,95 @@ body {
   padding: .5em .9em; color: var(--text-dim); font-size: .9em;
 }
 
+/* ---------- TOC 目录(第二十三轮)---------- */
+/* 用稳定类名 .wp-toc-* (无 per-uid 后缀),全局生效在编辑+预览两视图。
+   doc-toc innerHTML 只输出结构(无 inline <style>),h3 用兄弟选择器 `+` 触发
+   hover 显示,跨浏览器兼容(不用 :has())。
+   wrap position: fixed 锁在视窗右上角,不随页面滚。 */
 .wp-toc-floating-wrap {
+  /* 锁在视窗右上角,不跟 doc-toc / doc body 滚 */
   position: fixed;
-  top: 80px;
+  top: 24px;
   right: 24px;
-  z-index: 900;
-  display: flex;
-  align-items: flex-start;
+  z-index: 50;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: max-content;
 }
-.wp-toc-floating {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+.wp-toc-floating-btn {
   background: var(--bg-1);
   border: 1px solid var(--border);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
+  border-radius: 18px;
+  padding: 7px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
 }
-.wp-toc-floating:hover { background: var(--bg-soft); }
+.wp-toc-floating-btn:hover { background: var(--bg-soft); }
+.wp-toc-bridge { height: 6px; width: 100%; }  /* wrap:hover → button → bridge → panel 连续 hover */
 .wp-toc-floating-panel {
-  margin-right: 8px;
-  min-width: 220px;
-  max-width: 320px;
+  display: none;
+  width: 280px;
   max-height: 60vh;
   overflow-y: auto;
   background: var(--bg-1);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: .6em .8em;
+  border-radius: 8px;
+  padding: .4em 0;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-  display: none;
+  z-index: 49;
 }
-.wp-toc-floating-wrap.is-open .wp-toc-floating-panel { display: block; }
-.wp-toc-floating-panel .doc-toc-list { padding: 0; }
-.wp-toc-floating-panel .doc-toc-list ul { padding-left: 1em; }
-.wp-toc-floating-item { position: relative; }
-.wp-toc-floating-item.is-current > a { font-weight: 700; color: var(--accent, #d23); }
+.wp-toc-floating-wrap:hover .wp-toc-floating-panel,
+.wp-toc-floating-panel.is-open { display: block; }  /* hover 展开 + JS 显式 toggle */
+.wp-toc-floating-panel h3 {
+  padding: .4em .9em;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: 8px 8px 0 0;
+  position: sticky;
+  top: 0;
+}
+.wp-toc-h2-list, .wp-toc-h3-list { list-style: none; padding: 0; margin: 0; }
+.wp-toc-h2-item { margin: 0; }
+.wp-toc-h2-item > a {
+  display: block;
+  padding: .25em .9em;
+  color: var(--link);
+  text-decoration: none;
+  font-size: 13px;
+}
+.wp-toc-h2-item > a:hover {
+  background: var(--hover);
+  text-decoration: underline;
+}
+/* h3 子菜单:作为 h2-item 子元素(兄弟选择器 `+` 触发,跨浏览器兼容)
+   h2:hover 时显示 h3(inline flow,不被 panel overflow 裁切) */
+.wp-toc-h3-list { display: none; padding-left: 1em; }
+.wp-toc-h2-item:hover .wp-toc-h3-list { display: block; }  /* 不用 :has,跨 Firefox */
+.wp-toc-h3-list li { padding: 0; }
+.wp-toc-h3-list a {
+  display: block;
+  padding: 0.2em 0.9em;
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 12px;
+}
+.wp-toc-h3-list a:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+.wp-toc-empty-msg {
+  padding: .5em .9em;
+  color: var(--text-dim);
+  font-size: 12px;
+}

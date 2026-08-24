@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
-import type { EditorEvents } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { TextStyle } from "@tiptap/extension-text-style";
 import Color from "@tiptap/extension-color";
@@ -19,7 +18,7 @@ import { open, save, ask } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile, readFile } from "@tauri-apps/plugin-fs";
 import { getVersion } from "@tauri-apps/api/app";
 import { FontSize } from "./extensions/FontSize";
-import { GlobalAttrs, DivNode, SpanNode } from "./extensions/HtmlCompat";
+import { GlobalAttrs, DivNode, SpanNode, DocToc } from "./extensions/HtmlCompat";
 import { MenuBar } from "./components/MenuBar";
 import type { RibbonTab, EditMode } from "./components/MenuBar";
 import { Ribbon } from "./components/Ribbon";
@@ -32,14 +31,14 @@ import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
 import { AboutDialog } from "./components/AboutDialog";
 import { EditorContextMenu } from "./components/EditorContextMenu";
+// v0.1.13 第二十九轮:TOC UI 双轨方案
+// 1. 编辑器视图:React Portal TocFloating 挂到 document.body(避开 .editor-body contenteditable)
+// 2. 预览 iframe:doc-toc atom 自身的 inline style(独立 document,fixed lock iframe viewport)
+// 3. 浏览器 export:doc-toc atom inline style
+// 视觉一致(都看 wrap fixed 右上角 + panel + 子菜单)
 import { TocFloating } from "./components/TocFloating";
-import {
-  scanTocEntries,
-  regenDocToc,
-  enableDocToc,
-  disableDocToc,
-  type TocEntry,
-} from "./utils/tocGen";
+// toggle 通过 Ribbon「插入/删除目录」按钮
+import { toggleToc, hasTocInDoc, refreshTocHtml } from "./utils/tocGen";
 import { formatHtml } from "./utils/formatHtml";
 import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
 import { loadRecentColors, pushRecentColor } from "./utils/recentColors";
@@ -59,8 +58,7 @@ import {
   blockTypeToSelector,
 } from "./utils/defaultStyle";
 import { applyBodyBackground } from "./utils/headShell";
-import { TOC_STYLES } from "./utils/tocStyles";
-import { TOC_FLOATING_SCRIPT } from "./utils/tocFloatingScript";
+// v0.1.13 第十五轮:TOC_STYLES / TOC_FLOATING_SCRIPT 已不再使用 — inline docToc atom 自包含 <style> + <script>
 import "./App.css";
 
 const THEME_KEY = "tiptap-theme";
@@ -97,6 +95,10 @@ const injectBody = (raw: string, bodyHtml: string): string =>
 // 预览注入脚本：body 可编辑（contenteditable），编辑内容经 postMessage 同步回编辑器
 // 发送前克隆 body 并移除 script/style，避免脚本内容混入编辑文档
 const PREVIEW_EDIT_SCRIPT = `<script id="tiptap-preview-edit">(function(){if(window.parent===window)return;document.body.setAttribute("contenteditable","true");var t=null;document.addEventListener("input",function(){clearTimeout(t);t=setTimeout(function(){try{var c=document.body.cloneNode(true);c.querySelectorAll("script,style").forEach(function(n){n.remove()});window.parent.postMessage({type:"tiptap-preview-edit",html:c.innerHTML},"*")}catch(e){}},400)})})();<\/script>`;
+
+// v0.1.13 第二十六轮:TOC 改为 TocFloating React Portal 方案,
+// 预览视图在 iframe 内不显示浮动目录(用户切回编辑视图即可看到目录);
+// 保留 PREVIEW_EDIT_SCRIPT 让用户在 iframe 内直接编辑 + postMessage 同步到主编辑器
 
 const emptyDoc = (id: number): DocState => ({
   id,
@@ -139,6 +141,8 @@ function App() {
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<RibbonTab>("edit");
   const [wordCount, setWordCount] = useState(0);
+  // v0.1.13 第二十七轮:inline doc-toc 状态(从 doc content 推算,doc body 是否含 doc-toc atom)
+  const [tocEnabled, setTocEnabled] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
   const [recentColors, setRecentColors] = useState<RecentColorsResult>({ text: [], highlight: [] });
@@ -255,6 +259,8 @@ function App() {
       GlobalAttrs,
       DivNode,
       SpanNode,
+      // DocToc:仅作 schema 占位,TocFloating.tsx 是真正的 TOC UI
+      DocToc,
       TextStyle,
       Color,
       FontFamily,
@@ -284,137 +290,38 @@ function App() {
     if (editor) setWordCount(editor.getText().replace(/\s+/g, "").length);
   }, [editor]);
 
-  // ---- TOC(目录):状态 + regen 调度 ----
-  // tocEnabled 从 DocState 派生 — 随 activeId 切换而切换,不需要单独 state
-  const tocEnabled = activeDoc.tocEnabled === true;
-  const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);
-  const regenPendingRef = useRef(false);
-  const regenTimerRef = useRef<number | null>(null);
-  // regen 自身会 dispatch 事务(删除旧 nav + 重插新 nav),必须屏蔽这些事务再次触发
-  // scheduleRegen,否则 regen → transaction → schedule → regen 会无限自激
-  const regenRunningRef = useRef(false);
-
-  const refreshTocEntries = useCallback(() => {
-    if (!editor || !tocEnabled) {
-      setTocEntries([]);
-      return;
-    }
-    setTocEntries(scanTocEntries(editor));
-  }, [editor, tocEnabled]);
-
-  // 立即重建 nav(带自激保护);无 pending 时不动文档,避免离焦/保存把干净文档标脏
-  const flushRegen = useCallback(() => {
-    if (regenTimerRef.current) {
-      clearTimeout(regenTimerRef.current);
-      regenTimerRef.current = null;
-    }
-    if (!editor || !tocEnabled || !regenPendingRef.current) return;
-    regenPendingRef.current = false;
-    regenRunningRef.current = true;
-    try {
-      regenDocToc(editor);
-    } finally {
-      regenRunningRef.current = false;
-    }
-    refreshTocEntries();
-  }, [editor, tocEnabled, refreshTocEntries]);
-
-  const scheduleRegen = useCallback(() => {
-    if (!editor || !tocEnabled) return;
-    regenPendingRef.current = true;
-    if (regenTimerRef.current) clearTimeout(regenTimerRef.current);
-    regenTimerRef.current = window.setTimeout(() => {
-      regenTimerRef.current = null;
-      flushRegen();
-    }, 400);
-  }, [editor, tocEnabled, flushRegen]);
-
-  // 切文档 / 关文档 / 新建 / 写盘前:把待办 regen 落地,保证快照与磁盘内容含最新目录
-  const flushBeforeSwitch = useCallback(() => {
-    if (regenTimerRef.current) {
-      clearTimeout(regenTimerRef.current);
-      regenTimerRef.current = null;
-    }
-    if (!regenPendingRef.current) return;
-    regenPendingRef.current = false;
+  // v0.1.13 第二十七轮:跟踪 doc-toc 状态 + toggle 按钮
+  // doc-toc 状态由 doc content 推算(doc 是否含 docToc atom),不需要单独 state 持久化
+  const refreshTocEnabled = useCallback(() => {
     if (!editor) return;
-    regenRunningRef.current = true;
-    try {
-      regenDocToc(editor);
-    } finally {
-      regenRunningRef.current = false;
-    }
+    setTocEnabled(hasTocInDoc(editor));
   }, [editor]);
 
-  // 编辑事件:docChanged → debounce 400ms;光标离开标题 / 编辑区失焦 → 立即 flush
   useEffect(() => {
-    if (!editor || !tocEnabled) return;
-    const onTransaction = ({ transaction }: EditorEvents["transaction"]) => {
-      if (regenRunningRef.current) return; // regen 自身产生的事务,忽略
-      if (!transaction.docChanged) return;
-      scheduleRegen();
-    };
-    const onSelectionUpdate = () => {
-      if (!regenPendingRef.current) return;
-      const $head = editor.state.selection.$head;
-      let inHeading = false;
-      for (let d = $head.depth; d > 0; d--) {
-        if ($head.node(d).type.name === "heading") {
-          inHeading = true;
-          break;
-        }
-      }
-      // 还在标题里说明用户仍在改标题,等 debounce;离开标题立即落地
-      if (!inHeading) flushRegen();
-    };
-    const onBlur = () => flushRegen();
-    const dom = editor.view.dom;
-    editor.on("transaction", onTransaction);
-    editor.on("selectionUpdate", onSelectionUpdate);
-    dom.addEventListener("blur", onBlur);
+    if (!editor) return;
+    // 初次 + editor update 时刷新 tocEnabled
+    refreshTocEnabled();
+    const onUpdate = () => refreshTocEnabled();
+    editor.on("update", onUpdate);
     return () => {
-      editor.off("transaction", onTransaction);
-      editor.off("selectionUpdate", onSelectionUpdate);
-      dom.removeEventListener("blur", onBlur);
+      editor.off("update", onUpdate);
     };
-  }, [editor, tocEnabled, scheduleRegen, flushRegen]);
+  }, [editor, refreshTocEnabled]);
 
-  // ---- 启用 / 移除目录(Ribbon「📑 目录」按钮) ----
+  // toggle:插入或删除 doc-toc atom,返回新状态
   const onToggleToc = useCallback(() => {
     if (!editor) return;
-    // 丢弃旧调度:目录状态即将整体重建,pending 的 debounce 没有意义
-    if (regenTimerRef.current) {
-      clearTimeout(regenTimerRef.current);
-      regenTimerRef.current = null;
-    }
-    regenPendingRef.current = false;
-    regenRunningRef.current = true;
-    try {
-      if (tocEnabled) {
-        disableDocToc(editor);
-        updateActiveDoc({ tocEnabled: false });
-        setTocEntries([]);
-      } else {
-        setTocEntries(enableDocToc(editor));
-        updateActiveDoc({ tocEnabled: true });
-      }
-    } finally {
-      regenRunningRef.current = false;
-    }
-  }, [editor, tocEnabled, updateActiveDoc]);
+    const next = toggleToc(editor);
+    setTocEnabled(next);
+    updateActiveDoc({ tocEnabled: next });
+  }, [editor, updateActiveDoc]);
 
-  // 切换文档后刷新浮动目录数据(applyDoc 已同步把新内容灌进编辑器)
-  useEffect(() => {
-    refreshTocEntries();
-  }, [activeId, refreshTocEntries]);
-
-  // 卸载时清掉悬空定时器
-  useEffect(
-    () => () => {
-      if (regenTimerRef.current) clearTimeout(regenTimerRef.current);
-    },
-    []
-  );
+  // v0.1.13 第二十六轮:TOC 由 TocFloating.tsx(React Portal)渲染,
+  // 内部监听 editor.on("update") 自动重算 heading id + 写入 PM state。
+  // 这里不再需要 regen scheduling / tocEnabled state / onToggleToc。
+  //
+  // flushBeforeSwitch 也已废弃 — save/applyDoc 不再依赖 inline doc-toc atom,
+  // TocFloating 用 editor.getHTML() 输出 heading id(由 assignHeadingIds 写入)。
 
   // ---- 把当前编辑状态写回活动文档 ----
   const snapshotActive = useCallback((): DocState[] => {
@@ -423,7 +330,9 @@ function App() {
     return docs.map((d) => {
       if (d.id !== activeId) return d;
       if (d.kind === "html") {
-        return { ...d, body: editor.getHTML(), sourceText, mode, shell, rawFullDoc, filePath, isModified };
+        // 包含当前 tocEnabled 状态(从 doc content 推算的 cache)
+        const tocOn = d.tocEnabled ?? false;
+        return { ...d, body: editor.getHTML(), sourceText, mode, shell, rawFullDoc, filePath, isModified, tocEnabled: tocOn };
       }
       return { ...d, filePath, isModified };
     });
@@ -437,6 +346,15 @@ function App() {
       setIsModified(doc.isModified);
       if (doc.kind === "html") {
         editor?.commands.setContent(doc.body || "<p></p>");
+        // v0.1.13 第二十七轮:setContent 后 doc-toc atom 已被 parse,刷新 tocEnabled 状态
+        if (editor) {
+          setTocEnabled(hasTocInDoc(editor));
+          // v0.1.13 第二十八轮:refresh doc-toc atom 的 tocHtml 为最新版本(inline style)
+          // — 旧版 HTML 用 <style> 块(Tiptap PM 不生效),加载后 rebuild 为 inline style
+          if (hasTocInDoc(editor)) {
+            refreshTocHtml(editor);
+          }
+        }
         setMode(doc.mode);
         setSourceText(doc.sourceText);
         setShell(doc.shell);
@@ -449,14 +367,13 @@ function App() {
         setRawFullDoc(null);
       }
     },
-    [editor]
+    [editor, updateActiveDoc]
   );
 
   // ---- 切换标签 ----
   const switchDoc = useCallback(
     (id: number) => {
       if (id === activeId || !editor) return;
-      flushBeforeSwitch(); // 先把待办目录重建落地,再快照
       const updated = snapshotActive();
       setDocs(updated);
       const target = updated.find((d) => d.id === id);
@@ -464,14 +381,13 @@ function App() {
       setActiveId(id);
       applyDoc(target);
     },
-    [activeId, editor, snapshotActive, applyDoc, flushBeforeSwitch]
+    [activeId, editor, snapshotActive, applyDoc]
   );
 
   // ---- 关闭标签 ----
   const closeDoc = useCallback(
     (id: number) => {
       if (!editor) return;
-      flushBeforeSwitch(); // 关闭前落地待办目录重建
       if (docs.length <= 1) {
         // 最后一个标签：重置为空白文档
         const doc = emptyDoc(id);
@@ -490,13 +406,12 @@ function App() {
         setDocs(remaining);
       }
     },
-    [docs, activeId, editor, applyDoc, flushBeforeSwitch]
+    [docs, activeId, editor, applyDoc]
   );
 
   // ---- 新建标签 ----
   const newDoc = useCallback(() => {
     if (!editor) return;
-    flushBeforeSwitch(); // 新建前落地待办目录重建,避免快照丢掉最新 nav
     const updated = snapshotActive();
     const id = idRef.current++;
     const doc = emptyDoc(id);
@@ -510,7 +425,7 @@ function App() {
     setFilePath(null);
     setIsModified(false);
     setWordCount(0);
-  }, [editor, snapshotActive, flushBeforeSwitch]);
+  }, [editor, snapshotActive]);
 
   // ---- 解析原始 HTML：内联外部资源，提取外壳与完整文档 ----
   const parseShell = useCallback(
@@ -829,7 +744,6 @@ ${sh.styles}
     async (path: string) => {
       const doc = docs.find((d) => d.id === activeId);
       if (!doc || !editor) return;
-      flushBeforeSwitch(); // 写盘前落地待办目录重建,保证磁盘内容含最新 nav
       let content: string;
       if (doc.kind === "text") {
         content = doc.body;
@@ -857,7 +771,7 @@ ${sh.styles}
         }
       }
     },
-    [docs, activeId, editor, mode, sourceText, buildFullDoc, shell, updateActiveDoc, syncFromSource, flushBeforeSwitch]
+    [docs, activeId, editor, mode, sourceText, buildFullDoc, shell, updateActiveDoc, syncFromSource]
   );
 
   const saveFile = useCallback(async () => {
@@ -1186,6 +1100,11 @@ ${sh.styles}
     return () => window.removeEventListener("message", handler);
   }, [mode, editor, updateActiveDoc]);
 
+  // v0.1.13 第二十六轮:TocFloating.tsx 用 React onMouseEnter/Leave/onClick
+// 处理交互(hover 展开 / 鼠标移开收起 / click 跳转),不再需要 document click 委托
+// (之前 24 轮用的 click 委托假设 tocGen 输出 btn/panel id,但 React Portal 方案
+// 直接用 React 事件绑定更可靠)
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -1223,12 +1142,11 @@ ${sh.styles}
 
   const viewClass = viewMode === "page" ? "editor-page" : "editor-wide";
   const basePreview = (rawFullDoc ?? buildFullDoc(editor.getHTML(), shell));
-  const tocInject = tocEnabled
-    ? TOC_STYLES + "\n" + TOC_FLOATING_SCRIPT + "\n"
-    : "";
+  // v0.1.13 第二十六轮:TOC 由 TocFloating React Portal 渲染(只在编辑视图显示),
+  // 预览 iframe 不再注入 TOC hover/click 处理脚本
   const previewDoc = basePreview.replace(
     /<\/body>/i,
-    tocInject + PREVIEW_EDIT_SCRIPT + "</body>"
+    PREVIEW_EDIT_SCRIPT + "</body>"
   );
   const isTextDoc = activeDoc.kind === "text";
   const shownWordCount = isTextDoc ? activeDoc.body.length : wordCount;
@@ -1347,10 +1265,21 @@ ${sh.styles}
               {activeDoc.kind === "html" && shell?.headCss && (
                 <style>{scopedCss(shell.headCss)}</style>
               )}
+              {/* v0.1.13 第二十九轮:TOC UI 双轨方案
+                  1. 编辑器视图:React Portal TocFloating(整段挂到 document.body,
+                     避开 .editor-body contenteditable + .ProseMirror 等祖先,
+                     让 wrap position: fixed 锁 viewport 真正生效)
+                  2. 预览 iframe:doc-toc atom 自身的 inline style(独立 document)
+                  3. 浏览器 export:doc-toc atom inline style
+                  4. doc-toc atom 仍存 tocHtml attr(可保存),只是编辑器视图视觉
+                     用 React UI(用 CSS 让 atom 在 editor view 隐藏,
+                     但 atom 数据保留,saved HTML 不受影响)
+              */}
               <EditorContent editor={editor} />
-              {/* 浮动目录按钮 + 悬浮面板(portal 到 body,仅编辑模式) */}
-              {mode === "edit" && (
-                <TocFloating editor={editor} entries={tocEntries} enabled={tocEnabled} />
+              {/* v0.1.13 第二十九轮:WYSIWYG — React Portal TocFloating 只在 doc 含 doc-toc atom 时显示
+                  html 不含 TOC → 编辑器内也不显示 TOC(跟浏览器打开一致) */}
+              {mode === "edit" && activeDoc.kind === "html" && tocEnabled && (
+                <TocFloating editor={editor} enabled={true} />
               )}
             </div>
           )}

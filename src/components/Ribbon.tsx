@@ -26,9 +26,10 @@ interface RibbonProps {
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
   // RibbonHome 页面背景色回调(由 App.tsx 写到 shell.headCss)
   onPageBgChange: (hex: string) => void;
+  // v0.1.13 第二十七轮:inline doc-toc toggle 按钮状态
   tocEnabled: boolean;
   onToggleToc: () => void;
-  tocDisabled: boolean;
+  tocDisabled: boolean; // text doc / source 模式禁用
 }
 
 export function Ribbon(props: RibbonProps) {

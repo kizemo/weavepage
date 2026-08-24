@@ -1,5 +1,9 @@
-// 单元测试:slug 生成 / 去重 / 边界 / DOM 扫描
+// 单元测试:slug / scan / assignHeadingIds / DOM heading id
 // 跑法:pnpm tsx src/utils/tocGen.test.ts
+//
+// buildDocTocHtml / enableDocToc / regenDocToc / migrateLegacyTocParagraphs
+// 已在 v0.1.13 第二十六轮删除(TOC UI 改为 React Portal TocFloating.tsx),
+// 所以这里不再测 inline TOC 输出。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { slugify, uniqueSlug, scanHeadings, type TocEntry } from "./tocGen";
@@ -78,83 +82,33 @@ test("scanHeadings id 已有时不覆盖", () => {
   assert.equal(out[0]!.id, "custom");
 });
 
-import { buildDocTocHtml } from "./tocGen";
-
-const escapeCheck = (() => {
-  // 用一个含 < > & " 的条目,验证 escape
-})();
-
-test("buildDocTocHtml 空 entries 给空提示", () => {
-  const html = buildDocTocHtml([]);
-  assert.match(html, /class="doc-toc-empty"/);
-  assert.match(html, /无标题|未找到/);
-});
-
-test("buildDocTocHtml h2 / h3 嵌套", () => {
-  const html = buildDocTocHtml([
-    { level: 2, text: "A", id: "wp-toc-a" },
-    { level: 3, text: "a1", id: "wp-toc-a-2" },
-    { level: 2, text: "B", id: "wp-toc-b" },
-  ]);
-  assert.match(html, /<a class="doc-toc-h2" href="#wp-toc-a">A<\/a>/);
-  assert.match(html, /<a class="doc-toc-h3" href="#wp-toc-a-2">a1<\/a>/);
-  assert.match(html, /<a class="doc-toc-h2" href="#wp-toc-b">B<\/a>/);
-  // a1 的 <li> 必须嵌在 A 的 <li> 内(用 doc-toc-list-wrap > ul ul 嵌套验证)
-  const a1Idx = html.indexOf('href="#wp-toc-a-2"');
-  const aIdx = html.indexOf('href="#wp-toc-a"');
-  const bIdx = html.indexOf('href="#wp-toc-b"');
-  assert.ok(aIdx < a1Idx && a1Idx < bIdx, "顺序错");
-  assert.ok(html.indexOf("<ul>", aIdx) < a1Idx, "a1 应嵌在 A 的 <ul> 内");
-});
-
-test("buildDocTocHtml 转义 HTML 特殊字符", () => {
-  const html = buildDocTocHtml([
-    { level: 2, text: "<script>alert(1)</script>", id: "x" },
-  ]);
-  assert.ok(!html.includes("<script>alert"), "不能含未转义 <script>");
-  assert.match(html, /&lt;script&gt;/);
-});
-
-test("buildDocTocHtml contenteditable=false 防止 ProseMirror 接管", () => {
-  const html = buildDocTocHtml([{ level: 2, text: "A", id: "wp-toc-a" }]);
-  assert.match(html, /contenteditable="false"/);
-});
-
-test("buildDocTocHtml 默认折叠:list-wrap 在标题之后 + ▾ 字符", () => {
-  const html = buildDocTocHtml([{ level: 2, text: "A", id: "wp-toc-a" }]);
-  assert.match(html, /doc-toc-title/);
-  assert.match(html, /doc-toc-list-wrap/);
-  assert.match(html, /▾|目录/);
-});
-
-import { assignHeadingIds, clearHeadingIds } from "./tocGen";
+import { assignHeadingIds, clearHeadingIds, buildTocHtml } from "./tocGen";
 import type { Editor } from "@tiptap/core";
 
 // Mock Editor — 模拟 PM transaction 写入路径
-// assignHeadingIds 现在通过 editor.chain().focus().command(({ tr }) => ...).run()
-// 走 PM transaction,所以测试必须用 mock editor 记录 setNodeMarkup 调用
+// 第二十六轮:assignHeadingIds 改用 state.doc.descendants + editor.view.nodeDOM 找 heading
+// 不用 posAtDOM(对 doc 第一个 heading 会失败)
 function makeMockEditor(root: HTMLElement): {
   editor: Editor;
   ops: Array<{ pos: number; attrs: Record<string, unknown> }>;
   getAttrsAt: (pos: number) => Record<string, unknown> | undefined;
 } {
   const ops: Array<{ pos: number; attrs: Record<string, unknown> }> = [];
-  // 与 assignHeadingIds 同步过滤空 textContent 标题(否则 index 错位)
   const nodes = Array.from(root.querySelectorAll("h2, h3")).filter(
     (el) => (el.textContent ?? "").trim() !== ""
   );
-  // 给每个非空 heading 分配唯一 pos;同时预填当前 attrs(从 DOM id 读)
+  // 用 content position(i+1)作 key,对应 setNodeMarkup(pos+1)
   const elToPos = new Map<HTMLElement, number>();
   const attrsAtPos = new Map<number, Record<string, unknown>>();
   nodes.forEach((el, i) => {
     elToPos.set(el, i);
-    attrsAtPos.set(i, { id: el.id || null });
+    attrsAtPos.set(i + 1, { id: el.id || null });
   });
 
   const mock = {
     chain: () => ({
       focus: () => ({
-        command: (cb: (args: { tr: unknown }) => void) => ({
+        command: (cb: (args: { tr: unknown; state: unknown }) => void) => ({
           run: () => {
             const tr = {
               doc: {
@@ -163,25 +117,35 @@ function makeMockEditor(root: HTMLElement): {
                   if (!attrs) return null;
                   return { attrs: { ...attrs } };
                 },
+                descendants: (callback: (node: { type: { name: string } }, pos: number) => boolean | void) => {
+                  for (let i = 0; i < nodes.length; i++) {
+                    const el = nodes[i]!;
+                    const result = callback(
+                      { type: { name: "heading" } },
+                      i,
+                    );
+                    if (result === false) break;
+                  }
+                },
               },
               setNodeMarkup: (pos: number, _type: unknown, attrs: Record<string, unknown>) => {
                 attrsAtPos.set(pos, { ...attrs });
                 ops.push({ pos, attrs: { ...attrs } });
               },
             };
-            cb({ tr });
+            // state.doc 跟 tr.doc 共用同一份
+            const state = { doc: tr.doc };
+            cb({ tr, state });
           },
         }),
       }),
     }),
     view: {
-      posAtDOM: (el: HTMLElement, _offset: number) => {
-        const pos = elToPos.get(el);
-        if (pos === undefined) {
-          // 模拟真实 PM 的行为 — detached / 找不到就抛错,让 try/catch 兜住
-          throw new Error("MockEditor.posAtDOM: element not registered");
-        }
-        return pos;
+      // 返回 heading 索引 i 对应的 DOM 元素(elToPos key 是 i)
+      nodeDOM: (pos: number) => {
+        // mock 里 descendants 给的是 heading index,nodeDOM 反向
+        const i = pos; // pos = heading index
+        return nodes[i] as HTMLElement | undefined;
       },
     },
   };
@@ -189,8 +153,8 @@ function makeMockEditor(root: HTMLElement): {
   return {
     editor: mock as unknown as Editor,
     ops,
-    getAttrsAt: (pos) => {
-      const a = attrsAtPos.get(pos);
+    getAttrsAt: (headingIdx) => {
+      const a = attrsAtPos.get(headingIdx + 1);
       return a ? { ...a } : undefined;
     },
   };
@@ -222,7 +186,6 @@ test("assignHeadingIds id 变化时覆盖 (PM transaction 写新 attrs)", () => 
   assignHeadingIds(editor, root, [{ level: 2, text: "A", id: "wp-toc-new" }]);
   assert.equal(ops.length, 1);
   assert.equal(ops[0]!.attrs.id, "wp-toc-new");
-  // 关键断言:PM 节点 attrs 现在是新 id
   assert.equal(getAttrsAt(0)?.id, "wp-toc-new");
 });
 
@@ -239,7 +202,6 @@ test("assignHeadingIds 与 scanHeadings index 对齐(空标题不偏移)", () =>
   const entries = scanHeadings(root);
   assignHeadingIds(editor, root, entries);
   assert.equal(entries.length, 3);
-  // 3 个非空标题对应 3 次 setNodeMarkup,顺序与 scanHeadings 一致
   assert.equal(ops.length, 3);
   assert.equal(ops[0]!.attrs.id, "wp-toc-real");
   assert.equal(ops[1]!.attrs.id, "wp-toc-sub");
@@ -249,20 +211,58 @@ test("assignHeadingIds 与 scanHeadings index 对齐(空标题不偏移)", () =>
 // 回归保护 — Task 12 review 发现的 load-bearing bug:
 // 直接 el.setAttribute("id", ...) 不会同步到 PM node.attrs,
 // 导致 editor.getHTML() 输出旧 id,saved HTML / 预览锚点失效。
-// 现在 assignHeadingIds 走 PM transaction.setNodeMarkup,
-// editor.getHTML() 拿到的就是新 id(等价于 mock 中 getAttrsAt(pos).id)。
-test("assignHeadingIds 修复回归:PM 节点 attrs 同步为新 id(等价于 getHTML 输出)", () => {
-  const root = makeDom('<h2 id="wp-toc-old">A</h2>');
+// 现在 assignHeadingIds 走 PM transaction.setNodeMarkup + content position(pos+1),
+// 即使对 doc 第一个 heading(之前 posAtDOM(0) → nodeAt(0)=doc → 失败)也 work。
+test("assignHeadingIds 修复回归:PM 节点 attrs 同步为新 id(doc 第一个 heading)", () => {
+  // doc 第一个 heading(模拟 posAtDOM 返回 0 的真实场景)
+  const root = makeDom('<h2 id="wp-toc-old">First</h2>');
   const { editor, ops, getAttrsAt } = makeMockEditor(root);
-  // 模拟:scanHeadings 重新算 id(因为用户改了标题文本),
-  // 现在分配新 id "wp-toc-new",但 DOM 上的 id 仍是旧的
-  const newEntries = [{ level: 2 as const, text: "A updated", id: "wp-toc-new" }];
-  assignHeadingIds(editor, root, newEntries);
-  // 断言 1:发起了 PM transaction(关键路径)
+  assignHeadingIds(editor, root, [{ level: 2, text: "First", id: "wp-toc-new" }]);
   assert.equal(ops.length, 1);
-  // 断言 2:PM node.attrs 现在是新 id — 这就是 editor.getHTML() 会序列化的内容
+  assert.equal(ops[0]!.attrs.id, "wp-toc-new");
   assert.equal(getAttrsAt(0)?.id, "wp-toc-new");
-  // 断言 3:与旧的 DOM-only 路径不同(el.setAttribute 不会反映到 node.attrs)
-  // — 这个测试如果回退到 setAttribute,getAttrsAt(0).id 仍是 "wp-toc-old"
   assert.notEqual(getAttrsAt(0)?.id, "wp-toc-old");
+});
+
+// ============================================================================
+// v0.1.13 第二十八轮:buildTocHtml(生成 inline doc-toc HTML)
+// ============================================================================ 用 inline style,不依赖 <style> 块
+test("buildTocHtml 含 wrap + button + panel + submenu + script + inline style", () => {
+  const html = buildTocHtml([
+    { level: 2, text: "第一章", id: "wp-toc-a" },
+    { level: 3, text: "1.1 节", id: "wp-toc-a-2" },
+    { level: 2, text: "第二章", id: "wp-toc-b" },
+  ]);
+  // 第二十八轮:不再用 <style> 块,所有 CSS 用 inline style
+  assert.doesNotMatch(html, /<style>/);
+  // wrap div + inline style(含 position: fixed)
+  assert.match(html, /<div id="wp-toc-floating-wrap"[^>]*class="wp-toc-floating-wrap"[^>]*style="[^"]*position: fixed/);
+  assert.match(html, /top: 24px/);
+  assert.match(html, /right: 24px/);
+  // button
+  assert.match(html, /<button id="wp-toc-floating-btn"[^>]*style="[^"]*background: #ffffff/);
+  // panel:绝对定位 + 默认 display: none(属性顺序不固定,用单独断言)
+  assert.match(html, /<div id="wp-toc-floating-panel"[^>]*style="[^"]*position: absolute/);
+  assert.match(html, /<div id="wp-toc-floating-panel"[^>]*style="[^"]*display: none/);
+  // h2-item
+  assert.match(html, /<li class="wp-toc-h2-item"[^>]*data-target="wp-toc-a"/);
+  // data-h3-ids + data-h3-texts(JSON)
+  assert.match(html, /data-h3-ids='\["wp-toc-a-2"\]'/);
+  // submenu 绝对定位 + 默认 display: none(属性顺序不固定,用单独断言)
+  assert.match(html, /<div id="wp-toc-h3-submenu"[^>]*style="[^"]*right: 288px/);
+  assert.match(html, /<div id="wp-toc-h3-submenu"[^>]*style="[^"]*display: none/);
+  // script
+  assert.match(html, /<script>[\s\S]*wrap\.addEventListener\('mouseenter'/);
+});
+
+test("buildTocHtml 空 entries 也生成有效 HTML(无 h2 list 但 wrap 结构存在)", () => {
+  const html = buildTocHtml([]);
+  // 不含 <style> 块
+  assert.doesNotMatch(html, /<style>/);
+  // wrap 结构
+  assert.match(html, /<div id="wp-toc-floating-wrap"/);
+  assert.match(html, /<div id="wp-toc-floating-panel"/);
+  // h2-list 为空
+  assert.match(html, /<ul class="wp-toc-h2-list"[^>]*><\/ul>/);
+  assert.match(html, /<script>/);
 });

@@ -2,6 +2,11 @@ import { Extension, Node, mergeAttributes } from "@tiptap/core";
 import { DOMParser, Fragment } from "@tiptap/pm/model";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
+// DocToc 节点的实现在 src/extensions/DocToc.ts,这里 re-export 让 App.tsx
+// 的 import 路径不变(避免改一处就要改一片)
+export { DocToc } from "./DocToc";
+export type { DocTocAttrs } from "./DocToc";
+
 // 打开外部 HTML 时的保真扩展：
 // 1. GlobalAttrs：为所有常见节点/标记保留 class/style/id 属性（否则预览时 CSS 选择器全部失效）
 // 2. DivNode/SpanNode：保留 div/span 容器（Tiptap 默认会将其丢弃）
