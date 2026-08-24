@@ -142,112 +142,240 @@ export function scanTocEntries(editor: Editor): TocEntry[] {
 
 const TOC_SCRIPT = `
 (function(){
-  var wrap = document.getElementById('wp-toc-floating-wrap');
+  var wrap = document.querySelector('.wp-toc-floating-wrap');
   if (!wrap) return;
-  var btn = document.getElementById('wp-toc-floating-btn');
-  var panel = document.getElementById('wp-toc-floating-panel');
-  var submenu = document.getElementById('wp-toc-h3-submenu');
-  var submenuUl = submenu ? submenu.querySelector('.wp-toc-h3-submenu-list') : null;
-  var h2Items = wrap.querySelectorAll('.wp-toc-h2-item');
 
-  function showPanel() { if (panel) panel.style.display = 'block'; }
-  function hidePanel() { if (panel) panel.style.display = 'none'; }
-  function showSubmenu() { if (submenu) submenu.style.display = 'block'; }
-  function hideSubmenu() { if (submenu) submenu.style.display = 'none'; if (submenuUl) submenuUl.innerHTML = ''; }
-
-  var closeTimer = null;
-  function scheduleHide() {
-    if (closeTimer) clearTimeout(closeTimer);
-    closeTimer = setTimeout(function() {
-      hidePanel();
-      hideSubmenu();
-      closeTimer = null;
-    }, 300);
-  }
-  function cancelHide() {
-    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
-  }
-
-  wrap.addEventListener('mouseenter', function() {
-    cancelHide();
-    showPanel();
-  });
-  wrap.addEventListener('mouseleave', function() {
-    scheduleHide();
-  });
-
-  Array.prototype.forEach.call(h2Items, function(h2Item) {
-    h2Item.addEventListener('mouseenter', function() {
-      cancelHide();
-      showPanel();
-      var h3Ids, h3Texts;
+  // h3-submenu 是 wrap 的直接子节点(wrap 是 fixed,创建 containing block,
+  // submenu 用 absolute + right:100% 跳到 wrap 左侧)。
+  // 通过 data-for="<target-id>" 关联到对应的 h2-item。
+  var submenus = wrap.querySelectorAll('.wp-toc-h3-submenu');
+  Array.prototype.forEach.call(submenus, function(submenu) {
+    var list = submenu.querySelector('.wp-toc-h3-submenu-list');
+    if (!list) return;
+    // 初始化:把 data-h3-ids/texts JSON 解析到 list(只有首次需要)
+    if (!list.children.length) {
+      var h3Ids = [], h3Texts = [];
       try {
-        h3Ids = JSON.parse(h2Item.getAttribute('data-h3-ids') || '[]');
-        h3Texts = JSON.parse(h2Item.getAttribute('data-h3-texts') || '[]');
-      } catch (e) { return; }
-      if (!h3Ids.length) { hideSubmenu(); return; }
-      if (submenuUl) {
-        submenuUl.innerHTML = '';
-        for (var i = 0; i < h3Ids.length; i++) {
-          var li = document.createElement('li');
-          var a = document.createElement('a');
-          a.href = '#' + h3Ids[i];
-          a.className = 'wp-toc-h3-link';
-          a.textContent = h3Texts[i] || h3Ids[i];
-          a.setAttribute('data-target', h3Ids[i]);
-          li.appendChild(a);
-          submenuUl.appendChild(li);
-        }
-        var h2Rect = h2Item.getBoundingClientRect();
-        var wrapRect = wrap.getBoundingClientRect();
-        submenu.style.top = (h2Rect.top - wrapRect.top) + 'px';
-        showSubmenu();
+        h3Ids = JSON.parse(submenu.getAttribute('data-h3-ids') || '[]');
+        h3Texts = JSON.parse(submenu.getAttribute('data-h3-texts') || '[]');
+      } catch (e) {}
+      for (var i = 0; i < h3Ids.length; i++) {
+        var li = document.createElement('li');
+        var a = document.createElement('a');
+        a.className = 'wp-toc-h3-link';
+        a.href = '#' + h3Ids[i];
+        a.textContent = h3Texts[i] || h3Ids[i];
+        li.appendChild(a);
+        list.appendChild(li);
       }
-    });
-    h2Item.addEventListener('mouseleave', function(e) {
-      if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
-      scheduleHide();
-    });
-    var a = h2Item.querySelector('a.wp-toc-h2-link');
-    if (a) {
-      a.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var id = h2Item.getAttribute('data-target');
-        var tgt = document.getElementById(id);
-        if (tgt) {
-          tgt.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          hideSubmenu();
-          hidePanel();
-        }
-      });
     }
   });
 
-  if (submenu) {
-    submenu.addEventListener('mouseenter', cancelHide);
-    submenu.addEventListener('click', function(e) {
-      var a = e.target.closest && e.target.closest('a[data-target]');
-      if (!a) return;
-      e.preventDefault();
-      e.stopPropagation();
-      var id = a.getAttribute('data-target');
-      var tgt = document.getElementById(id);
-      if (tgt) {
-        tgt.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        hideSubmenu();
-        hidePanel();
-      }
+  // h2-item hover → 找到对应 submenu 并显示 + 动态对齐 top
+  var h2Items = wrap.querySelectorAll('.wp-toc-h2-item');
+  Array.prototype.forEach.call(h2Items, function(h2Item) {
+    var targetId = h2Item.getAttribute('data-target');
+    var submenu = wrap.querySelector('.wp-toc-h3-submenu[data-for="' + targetId + '"]');
+    if (!submenu) return;
+    h2Item.addEventListener('mouseenter', function() {
+      var wrapRect = wrap.getBoundingClientRect();
+      var itemRect = h2Item.getBoundingClientRect();
+      // top 相对 wrap 的容器(viewport - wrapRect.top)
+      submenu.style.top = (itemRect.top - wrapRect.top) + 'px';
+      submenu.classList.add('is-open');
     });
-  }
+    h2Item.addEventListener('mouseleave', function(e) {
+      // 鼠标进入 submenu 不关闭
+      if (submenu.contains(e.relatedTarget)) return;
+      submenu.classList.remove('is-open');
+    });
+    // submenu mouseleave → 如果进入 h2-item 不关闭
+    submenu.addEventListener('mouseleave', function(e) {
+      if (h2Item.contains(e.relatedTarget)) return;
+      submenu.classList.remove('is-open');
+    });
+    // submenu mouseenter → 加 open class(防止 mouseleave 把 is-open 移除后丢失)
+    submenu.addEventListener('mouseenter', function() {
+      submenu.classList.add('is-open');
+    });
+  });
+
+  // 点击 wrap 内任意 anchor(h2-link 或 h3-link),滚动到对应 heading
+  wrap.addEventListener('click', function(e) {
+    var a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (href.length < 2) return;
+    var id = href.slice(1);
+    var tgt = document.getElementById(id);
+    if (tgt) {
+      e.preventDefault();
+      tgt.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
 })();
 `;
 
-// 生成 doc-toc atom 的 tocHtml 字符串(完整 inline-style HTML 模板)
-// 所有 CSS 用 inline style 属性,不用 <style> 块,确保 PM serialize + 浏览器 parse 都生效
+// v0.1.13 第三十轮:TOC 全部 CSS(集中放在 saved file 的 <head> 之间)
+// wrap 固定到 viewport 右上角,panel 在 wrap 下方,
+// 每个 h2-item hover 显示自己专属的 h3-submenu(从该 h2 左侧弹出)。
+// 颜色主题蓝色基调,匹配 WeavePage 整体视觉。
+const TOC_CSS = `
+.wp-toc-floating-wrap {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 9999;
+  width: 280px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1f2328;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wp-toc-floating-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #d0d8e0;
+  border-radius: 22px;
+  padding: 8px 16px;
+  box-shadow: 0 2px 12px rgba(0, 48, 112, 0.15);
+  color: #003070;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+.wp-toc-floating-btn:hover {
+  background: #f0f4f8;
+  border-color: #003070;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 48, 112, 0.2);
+}
+.wp-toc-floating-panel {
+  display: none;
+  width: 280px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #d0d8e0;
+  border-radius: 10px;
+  margin-top: 6px;
+  box-shadow: 0 8px 28px rgba(0, 48, 112, 0.18);
+  box-sizing: border-box;
+}
+.wp-toc-floating-wrap:hover .wp-toc-floating-panel,
+.wp-toc-floating-panel.is-open {
+  display: block;
+}
+.wp-toc-panel-header {
+  padding: 10px 16px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #003070 0%, #1a4480 100%);
+  border-radius: 10px 10px 0 0;
+  letter-spacing: 0.5px;
+}
+.wp-toc-h2-list {
+  list-style: none;
+  padding: 4px 0;
+  margin: 0;
+}
+.wp-toc-h2-item {
+  position: relative;
+  margin: 0;
+}
+.wp-toc-h2-link {
+  display: block;
+  padding: 9px 16px;
+  color: #1f2328;
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.5;
+  border-left: 3px solid transparent;
+  transition: all 0.12s ease;
+  box-sizing: border-box;
+}
+.wp-toc-h2-item:hover > .wp-toc-h2-link {
+  background: #f0f4f8;
+  color: #1a56db;
+  border-left-color: #1a56db;
+}
+.wp-toc-h3-submenu {
+  display: none;
+  /* 以 .wp-toc-floating-wrap(fixed)为定位基准:wrap 创建 containing block,
+     right:100% = 跳到 wrap 左侧,submenu 宽度固定不依赖父 width */
+  position: absolute;
+  top: 0;
+  right: 100%;
+  margin-right: 8px;
+  width: 320px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #d0d8e0;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 48, 112, 0.18);
+  z-index: 2;
+  box-sizing: border-box;
+}
+.wp-toc-h3-submenu.is-open {
+  display: block;
+}
+.wp-toc-h3-submenu-list {
+  list-style: none;
+  padding: 4px 0;
+  margin: 0;
+}
+.wp-toc-h3-link {
+  display: block;
+  padding: 9px 16px;
+  color: #1f2328;
+  text-decoration: none;
+  font-size: 12px;
+  line-height: 1.5;
+  border-left: 3px solid transparent;
+  transition: all 0.12s ease;
+  box-sizing: border-box;
+}
+.wp-toc-h3-link:hover {
+  background: #f0f4f8;
+  color: #1a56db;
+  border-left-color: #1a56db;
+}
+`;
+
+// 把 TOC_CSS 包成 <style> 标签(含 id 标识,便于 toggling 时按 id 移除)
+export function buildTocStyleTag(): string {
+  return `<style id="wp-toc-style">\n${TOC_CSS}\n</style>`;
+}
+
+// 从 head 字符串里移除 TOC style 标签(按 id 标识)
+export function removeTocStyleTag(head: string): string {
+  return head.replace(/<style\s+id=["']wp-toc-style["']>[\s\S]*?<\/style>/gi, "");
+}
+
+// 判断 head 字符串里是否已含 TOC style
+export function hasTocStyleTag(head: string): boolean {
+  return /<style\s+id=["']wp-toc-style["']>/i.test(head);
+}
+
+// 生成 doc-toc atom 的 tocHtml 字符串
+// 第三十轮:全部 CSS 移到 <head>(由 buildTocStyleTag 注入),这里只输出 class 结构
 export function buildTocHtml(entries: TocEntry[]): string {
-  // 构造 h2 list(每个 h2-item 含 h3-ids/texts JSON,供 submenu 渲染用)
+  // 第三十轮:把 h3-submenu 移到 wrap 直接子节点(wrap 是 position:fixed,
+  // 创建 containing block,submenu absolute 定位稳定),不在 h2-item 内
+  // — 避免 li 默认样式 + 子节点 absolute 的渲染不确定性
   const h2ListItems: string[] = [];
+  const submenuElements: string[] = [];
   let i = 0;
   while (i < entries.length) {
     const e = entries[i]!;
@@ -264,25 +392,35 @@ export function buildTocHtml(entries: TocEntry[]): string {
     const h3Ids = h3Children.map((h3) => h3.id);
     const h3Texts = h3Children.map((h3) => h3.text);
     const target = e.id;
+    // h2 list item(不含 submenu)
     h2ListItems.push(
-      `<li class="wp-toc-h2-item" style="list-style: none; margin: 0; padding: 0; transition: background-color 0.12s ease;" data-h3-ids='${JSON.stringify(h3Ids)}' data-h3-texts='${JSON.stringify(h3Texts)}' data-target="${target}" onmouseenter="this.style.background='#f0f4f8'" onmouseleave="this.style.background=''"><a href="#${target}" class="wp-toc-h2-link" style="display: block; padding: 9px 16px; color: #1f2328; text-decoration: none; font-size: 13px; line-height: 1.5; border-left: 3px solid transparent; transition: all 0.12s ease; box-sizing: border-box;">${escHtml(e.text)}</a></li>`,
+      `<li class="wp-toc-h2-item" data-target="${target}">` +
+      `<a href="#${target}" class="wp-toc-h2-link">${escHtml(e.text)}</a>` +
+      `</li>`,
     );
+    // submenu:作为 wrap 的兄弟节点(panel 之后),用 data-for 关联 h2
+    if (h3Ids.length > 0) {
+      submenuElements.push(
+        `<div class="wp-toc-h3-submenu" data-for="${target}" data-h3-ids='${JSON.stringify(h3Ids)}' data-h3-texts='${JSON.stringify(h3Texts)}'>` +
+        `<ul class="wp-toc-h3-submenu-list"></ul>` +
+        `</div>`,
+      );
+    }
     i = j;
   }
 
-  // 所有 CSS 用 inline style(确保 PM serialize + 浏览器 parse 都生效)
   return (
-    `<div id="wp-toc-floating-wrap" class="wp-toc-floating-wrap" style="position: fixed; top: 24px; right: 24px; z-index: 9999; display: block; width: 280px; background: transparent; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif; font-size: 14px; line-height: 1.5;">` +
-    `<button id="wp-toc-floating-btn" class="wp-toc-floating-btn" type="button" style="position: relative; display: flex; width: 100%; align-items: center; gap: 6px; background: #ffffff; border: 1px solid #d0d8e0; border-radius: 22px; padding: 8px 16px; box-shadow: 0 2px 12px rgba(0, 48, 112, 0.15); color: #003070; font-weight: 600; font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.15s ease; box-sizing: border-box;" onmouseenter="this.style.background='#f0f4f8'; this.style.borderColor='#003070'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 16px rgba(0, 48, 112, 0.2)';" onmouseleave="this.style.background='#ffffff'; this.style.borderColor='#d0d8e0'; this.style.transform=''; this.style.boxShadow='0 2px 12px rgba(0, 48, 112, 0.15)';">` +
-    `<span aria-hidden="true">📑</span><span>目录</span><span aria-hidden="true">▾</span>` +
+    `<div class="wp-toc-floating-wrap">` +
+    `<button class="wp-toc-floating-btn" type="button">` +
+    `<span aria-hidden="true">📑</span>` +
+    `<span>目录</span>` +
+    `<span aria-hidden="true">▾</span>` +
     `</button>` +
-    `<div id="wp-toc-floating-panel" class="wp-toc-floating-panel" role="region" aria-label="文档目录" style="display: none; position: absolute; top: 42px; right: 0; width: 280px; max-height: 60vh; overflow-y: auto; background: #ffffff; border: 1px solid #d0d8e0; border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 48, 112, 0.18); z-index: 1; box-sizing: border-box;">` +
-    `<h3 style="padding: 10px 16px; margin: 0; font-size: 13px; font-weight: 600; color: #ffffff; background: linear-gradient(135deg, #003070 0%, #1a4480 100%); border-bottom: none; border-radius: 10px 10px 0 0; letter-spacing: 0.5px;">文档大纲</h3>` +
-    `<ul class="wp-toc-h2-list" style="list-style: none; padding: 4px 0; margin: 0;">${h2ListItems.join("")}</ul>` +
+    `<div class="wp-toc-floating-panel" role="region" aria-label="文档目录">` +
+    `<h3 class="wp-toc-panel-header">文档大纲</h3>` +
+    `<ul class="wp-toc-h2-list">${h2ListItems.join("")}</ul>` +
     `</div>` +
-    `<div id="wp-toc-h3-submenu" class="wp-toc-h3-submenu" role="region" aria-label="h3 子菜单" style="display: none; position: absolute; top: 42px; right: 288px; width: 320px; max-height: 60vh; overflow-y: auto; background: #ffffff; border: 1px solid #d0d8e0; border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 48, 112, 0.18); z-index: 2; box-sizing: border-box;">` +
-    `<ul class="wp-toc-h3-submenu-list" style="list-style: none; padding: 4px 0; margin: 0;"></ul>` +
-    `</div>` +
+    submenuElements.join("") +
     `</div>` +
     `<script>${TOC_SCRIPT}</script>`
   );

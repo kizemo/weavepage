@@ -31,18 +31,17 @@ import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
 import { AboutDialog } from "./components/AboutDialog";
 import { EditorContextMenu } from "./components/EditorContextMenu";
-// v0.1.13 第二十九轮:TOC UI 双轨方案
-// 1. 编辑器视图:React Portal TocFloating 挂到 document.body(避开 .editor-body contenteditable)
-// 2. 预览 iframe:doc-toc atom 自身的 inline style(独立 document,fixed lock iframe viewport)
-// 3. 浏览器 export:doc-toc atom inline style
-// 视觉一致(都看 wrap fixed 右上角 + panel + 子菜单)
-import { TocFloating } from "./components/TocFloating";
+// v0.1.13 第三十轮:TOC 改为在 iframe 内部渲染(由 shell.head 的 TOC_CSS + doc-toc atom 的 TOC_SCRIPT 驱动)
+// 编辑器视图 / 预览视图 / 浏览器打开 三者完全 WYSIWYG 一致
+// 旧 React Portal TocFloating.tsx 已不再使用
 // toggle 通过 Ribbon「插入/删除目录」按钮
 import {
   hasDocTocInHtml,
   toggleDocTocInHtml,
   scanHeadingsFromHtml,
   assignHeadingIdsInHtml,
+  buildTocStyleTag,
+  removeTocStyleTag,
 } from "./utils/tocGen";
 import { formatHtml } from "./utils/formatHtml";
 import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
@@ -309,13 +308,36 @@ function App() {
     setTocEnabled(hasDocTocInHtml(docHtml));
   }, [docHtml]);
 
-  // toggle:插入或删除 doc-toc atom,返回新状态
+  // toggle:插入/删除 doc-toc atom,同时同步 shell.head 中的 TOC CSS
+  // 第三十轮:CSS 集中在 <head>(便于 saved file 浏览器查看 + 编辑器 iframe WYSIWYG 一致)
   const onToggleToc = useCallback(() => {
     const { html, enabled } = toggleDocTocInHtml(docHtml);
     setDocHtml(html);
     setTocEnabled(enabled);
     updateActiveDoc({ tocEnabled: enabled });
-  }, [docHtml, updateActiveDoc]);
+    // 同步 shell.head — 插入/移除 <style id="wp-toc-style">
+    // shell 改变 → useMemo [activeDoc.id, shell] 重算 → iframe.srcDoc 更新 → iframe 重新加载
+    // (用户不在 toggle 期间打字,可接受;TOC toggle 是低频操作)
+    const baseShell: DocShell = shell ?? {
+      doctype: "<!DOCTYPE html>",
+      head: "",
+      headCss: "",
+      bodyAttrs: "",
+      scripts: "",
+      styles: "",
+      baseHref: "",
+    };
+    const newHead = enabled
+      ? (baseShell.head.includes("wp-toc-style")
+          ? baseShell.head
+          : baseShell.head + buildTocStyleTag())
+      : removeTocStyleTag(baseShell.head);
+    if (newHead !== baseShell.head) {
+      const newShell = { ...baseShell, head: newHead };
+      setShell(newShell);
+      updateActiveDoc({ shell: newShell });
+    }
+  }, [docHtml, shell, updateActiveDoc]);
 
   // v0.1.13 第二十六轮:TOC 由 TocFloating.tsx(React Portal)渲染,
   // 内部监听 editor.on("update") 自动重算 heading id + 写入 PM state。
@@ -1426,10 +1448,12 @@ const handleSpacingChange = useCallback(
                   });
                 }}
               />
-              {/* v0.1.13 第三十轮:TocFloating 改用 iframeRef + docHtml 扫描(不再依赖 editor) */}
-              {mode === "edit" && activeDoc.kind === "html" && tocEnabled && (
-                <TocFloating iframeRef={iframeRef} docHtml={docHtml} enabled={true} />
-              )}
+              {/* v0.1.13 第三十轮:编辑器视图只显示 iframe 内 doc-toc atom(由 shell.head 中 TOC CSS 渲染),
+                  不再额外渲染 TocFloating React Portal — 编辑器视图与浏览器打开完全一致(WYSIWYG)
+                  doc-toc atom 在 iframe 内由 TOC_SCRIPT 处理 hover/click,与 preview iframe 一致 */}
+              {/* v0.1.13 第三十轮:编辑器视图只显示 iframe 内 doc-toc atom(由 shell.head 中 TOC CSS 渲染),
+                  不再额外渲染 TocFloating React Portal — 编辑器视图与浏览器打开完全一致(WYSIWYG)
+                  doc-toc atom 在 iframe 内由 TOC_SCRIPT 处理 hover/click,与 preview iframe 一致 */}
             </div>
           )}
         </div>

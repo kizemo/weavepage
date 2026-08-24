@@ -28,3 +28,4 @@ release/
 *.sw?
 handoff-*.md
 prompt-*.md
+test-openrecent.html
