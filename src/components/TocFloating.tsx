@@ -1,33 +1,32 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
-import type { Editor } from "@tiptap/core";
+import type { RefObject } from "react";
 import {
-  scanTocEntries,
-  assignHeadingIds,
+  scanHeadings,
   type TocEntry,
 } from "../utils/tocGen";
 
 interface TocFloatingProps {
-  editor: Editor;
+  iframeRef: RefObject<HTMLIFrameElement | null>;
+  docHtml: string; // 用于 wrap 右边位置计算(避免读 iframe)
   enabled: boolean;
 }
 
-// 浮动目录 React Portal — v0.1.13 第二十九轮
+// 浮动目录 React Portal — v0.1.13 第三十轮:iframe-based 编辑器
 //
 // 关键设计:
-// - 整段 wrap 用 createPortal 挂到 document.body(完全避开 .editor-body contenteditable
-//   容器 + .ProseMirror view container,锁 viewport fixed 真正生效)
+// - 整段 wrap 用 createPortal 挂到 document.body(完全避开 iframe + contenteditable)
 // - preview iframe 是独立 document,iframe 内 React 不会自动渲染,所以预览界面
 //   仍由 doc-toc atom 自身的 inline style 渲染(浏览器标准 fixed work)
-// - 编辑器视图 = React Portal UI(避开 contenteditable fixed 兼容问题)
+// - 编辑器视图 = React Portal UI(扫描 iframe.contentDocument.body 的 h2/h3)
 // - 视觉一致:两个视图都看到 wrap 浮动右上角 + panel hover 展开 + 子菜单
 
-export function TocFloating({ editor, enabled }: TocFloatingProps) {
+export function TocFloating({ iframeRef, docHtml, enabled }: TocFloatingProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [entries, setEntries] = useState<TocEntry[]>([]);
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
-  // wrap 右边位置:对齐 page 元素右缘
+  // wrap 右边位置:对齐 iframe 内 body 元素右缘
   const [right, setRight] = useState(12);
 
   // 当前 hover 的 h2(用于子菜单位置 + 内容)
@@ -39,41 +38,45 @@ export function TocFloating({ editor, enabled }: TocFloatingProps) {
   const [hoveredH2, setHoveredH2] = useState<H2HoverState | null>(null);
   const closeSubmenuTimerRef = useRef<number | null>(null);
 
-  // 扫描 heading + 给 heading DOM 设 id(让 scrollIntoView 跳转) + 写 PM state id
+  // 扫描 iframe.contentDocument.body 的 h2/h3(替代 editor.getHTML 扫描)
   useEffect(() => {
-    if (!editor || !enabled) return;
+    if (!enabled) return;
     let debounceTimer: number | null = null;
     const refresh = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
-        const dom = editor.view.dom as HTMLElement;
-        const fresh = scanTocEntries(editor);
-        const h2h3 = Array.from(dom.querySelectorAll("h2, h3")).filter(
-          (el) => (el.textContent ?? "").trim() !== "",
+        const doc = iframeRef.current?.contentDocument;
+        if (!doc) return;
+        const fresh = scanHeadings(doc.body);
+        const h2h3 = Array.from(doc.body.querySelectorAll("h2, h3")).filter(
+          (el) => (el.textContent ?? "").trim() !== ""
         );
-        // 给 DOM 元素设 id
+        // 给 DOM 元素设 id(让 scrollIntoView 跳转用)
         h2h3.forEach((el, i) => {
           const e = fresh[i];
           if (e) el.id = e.id;
         });
-        // 同步到 PM state(editor.getHTML() 输出 <h2 id="...">,saved/export 都有 id)
-        assignHeadingIds(editor, dom, fresh);
         setEntries(fresh);
       }, 400);
     };
     refresh();
-    editor.on("update", refresh);
+    // 监听 iframe 内 DOM 变化(用户编辑 heading 文本时触发)
+    const doc = iframeRef.current?.contentDocument;
+    const mo = doc ? new MutationObserver(refresh) : null;
+    if (mo && doc && doc.body) mo.observe(doc.body, { childList: true, subtree: true, characterData: true });
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      editor.off("update", refresh);
+      mo?.disconnect();
     };
-  }, [editor, enabled]);
+  }, [iframeRef, enabled, docHtml]);
 
-  // wrap 右边位置:对齐 page 元素右边
+  // wrap 右边位置:对齐 iframe 内 page 元素右缘
   useEffect(() => {
-    if (!editor) return;
-    const pageEl = editor.view.dom as HTMLElement;
+    if (!enabled) return;
     const update = () => {
+      const doc = iframeRef.current?.contentDocument;
+      if (!doc) return;
+      const pageEl = doc.body as HTMLElement;
       const rect = pageEl.getBoundingClientRect();
       const cs = window.getComputedStyle(pageEl);
       const paddingRight = parseFloat(cs.paddingRight) || 0;
@@ -82,14 +85,15 @@ export function TocFloating({ editor, enabled }: TocFloatingProps) {
     update();
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
-    const ro = new ResizeObserver(update);
-    ro.observe(pageEl);
+    const doc = iframeRef.current?.contentDocument;
+    const ro = doc ? new ResizeObserver(update) : null;
+    if (ro && doc?.body) ro.observe(doc.body);
     return () => {
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
-      ro.disconnect();
+      ro?.disconnect();
     };
-  }, [editor]);
+  }, [iframeRef, enabled, docHtml]);
 
   const handleEnter = useCallback(() => {
     if (closeTimerRef.current) {
@@ -107,14 +111,15 @@ export function TocFloating({ editor, enabled }: TocFloatingProps) {
   const handleClick = useCallback((id: string) => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const dom = editor.view.dom as HTMLElement;
-    const tgt = dom.querySelector(`#${CSS.escape(id)}`);
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc) return;
+    const tgt = doc.querySelector(`#${CSS.escape(id)}`);
     if (tgt) {
       tgt.scrollIntoView({ behavior: "smooth", block: "start" });
       setOpen(false);
       setHoveredH2(null);
     }
-  }, [editor]);
+  }, [iframeRef]);
 
   useEffect(() => () => {
     if (closeSubmenuTimerRef.current) {

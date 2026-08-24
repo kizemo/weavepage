@@ -403,3 +403,81 @@ export function refreshTocHtml(editor: Editor): void {
     return true;
   }).run();
 }
+
+// ============================================================================
+// v0.1.13 第三十轮:iframe-based 编辑器的 docHtml 字符串层 TOC helpers
+//
+// 不依赖 Tiptap PM,直接对 HTML 字符串做 parse → 修改 → 输出。
+// 主要用于:
+//   - TocFloating 扫描 iframe.contentDocument.body 的 h2/h3
+//   - onToggleToc 直接在 docHtml 字符串里插入/删除 doc-toc atom
+//   - hasTocEnabled 检测 docHtml 是否含 doc-toc 节点
+// ============================================================================
+
+/** 用 DOMParser 解析 HTML 字符串,返回 Document(主线程 DOMParser) */
+function parseHtml(html: string): Document {
+  return new DOMParser().parseFromString(html, "text/html");
+}
+
+/** docHtml 是否含 doc-toc 节点(<div class="doc-toc" ...>) */
+export function hasDocTocInHtml(html: string): boolean {
+  if (!html) return false;
+  const doc = parseHtml(html);
+  return !!doc.querySelector(".doc-toc, [data-type='doc-toc'], doc-toc, .wp-toc-floating-wrap");
+}
+
+/** 从 HTML 字符串扫描 h2/h3 标题,返回 TocEntry[] */
+export function scanHeadingsFromHtml(html: string): TocEntry[] {
+  if (!html) return [];
+  const doc = parseHtml(html);
+  return scanHeadings(doc.body);
+}
+
+/** 切换 doc-toc atom:返回新 docHtml + 是否启用 */
+export function toggleDocTocInHtml(html: string): { html: string; enabled: boolean } {
+  if (hasDocTocInHtml(html)) {
+    return { html: removeDocTocInHtml(html), enabled: false };
+  } else {
+    const entries = scanHeadingsFromHtml(html);
+    const tocHtml = buildTocHtml(entries);
+    return { html: insertDocTocInHtml(html, tocHtml), enabled: true };
+  }
+}
+
+/** 在 docHtml 字符串开头插入 doc-toc atom(完整 HTML 形式,不依赖 Tiptap) */
+export function insertDocTocInHtml(html: string, tocHtml: string): string {
+  // 构造 doc-toc 节点(参考 DocToc extension renderHTML):
+  // <div class="doc-toc" data-toc="1"><div class="wp-toc-floating-wrap">...</div></div>
+  // 内层 wrap 由 buildTocHtml 提供;DocToc atom 自身只承担 schema 占位角色
+  const tocNode = `<div class="doc-toc" data-toc="1" data-doc-toc="1">${tocHtml}</div>`;
+  // 插到 body 最前(若有 <body> 标签则在 body 开头;否则 prepend)
+  // parseHtml 用 text/html 总是有 body
+  const doc = parseHtml(html);
+  const body = doc.body;
+  if (!body) return tocNode + html;
+  body.insertAdjacentHTML("afterbegin", tocNode);
+  return doc.body.innerHTML;
+}
+
+/** 从 docHtml 字符串里删除 doc-toc 节点 */
+export function removeDocTocInHtml(html: string): string {
+  if (!html) return html;
+  const doc = parseHtml(html);
+  const tocs = doc.body.querySelectorAll(".doc-toc, doc-toc, [data-doc-toc='1']");
+  tocs.forEach((el) => el.parentNode?.removeChild(el));
+  return doc.body.innerHTML;
+}
+
+/** 把 entries 中的 id 同步写入 docHtml 里的 h2/h3(修改 HTML 字符串) */
+export function assignHeadingIdsInHtml(html: string, entries: TocEntry[]): string {
+  if (!html) return html;
+  const doc = parseHtml(html);
+  const nodes = Array.from(doc.body.querySelectorAll("h2, h3")).filter(
+    (el) => (el.textContent ?? "").trim() !== ""
+  );
+  nodes.forEach((el, i) => {
+    const e = entries[i];
+    if (e) el.id = e.id;
+  });
+  return doc.body.innerHTML;
+}

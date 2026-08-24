@@ -1,4 +1,9 @@
-import type { Editor } from "@tiptap/react";
+// v0.1.13 第三十轮:Ribbon 接收 iframeRef 替代 editor prop
+// - 字体/段落/样式/链接由 RibbonHome 用 iframe.contentDocument.execCommand 实现
+// - 表格/插图/水平线/目录由 RibbonInsert 用 iframe DOM + execCommand 实现
+// - editor 仍然存在(给 TocFloating 用),但 Ribbon 不再依赖
+
+import type { RefObject } from "react";
 import { RibbonButton } from "./controls";
 import { RibbonHome } from "./RibbonHome";
 import { RibbonInsert } from "./RibbonInsert";
@@ -8,21 +13,19 @@ export type ViewMode = "page" | "wide";
 export type ThemeMode = "system" | "light" | "dark";
 
 interface RibbonProps {
-  editor: Editor;
+  iframeRef: RefObject<HTMLIFrameElement | null>;
   disabled: boolean; // 源码视图时禁用
   activeTab: RibbonTab;
   collapsed: boolean;
   previewActive: boolean;
   onPreview: () => void;
   onInsertImage: () => void;
-  onInsertTable: (rows: number, cols: number) => void;
-  onDeleteTable: () => void;
   onLink: () => void;
   // 最近颜色(RibbonHome 用),App 层记录用色
   recentTextColors: string[];
   recentHighlightColors: string[];
   onColorUsed: (kind: "text" | "highlight", color: string) => void;
-  // RibbonHome 段落组行距 / 段前后 回调(由 App.tsx 实现,直接改 Tiptap 节点的 inline style)
+  // RibbonHome 段落组行距 / 段前后 回调(由 App.tsx 实现)
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
   // RibbonHome 页面背景色回调(由 App.tsx 写到 shell.headCss)
   onPageBgChange: (hex: string) => void;
@@ -46,7 +49,7 @@ export function Ribbon(props: RibbonProps) {
         <div className={`ribbon-tab-content ${props.disabled ? "disabled" : ""}`}>
           {props.activeTab === "edit" ? (
             <RibbonHome
-              editor={props.editor}
+              iframeRef={props.iframeRef}
               onLink={props.onLink}
               recentTextColors={props.recentTextColors}
               recentHighlightColors={props.recentHighlightColors}
@@ -56,10 +59,8 @@ export function Ribbon(props: RibbonProps) {
             />
           ) : (
             <RibbonInsert
-              editor={props.editor}
+              iframeRef={props.iframeRef}
               onInsertImage={props.onInsertImage}
-              onInsertTable={props.onInsertTable}
-              onDeleteTable={props.onDeleteTable}
               tocEnabled={props.tocEnabled}
               onToggleToc={props.onToggleToc}
               tocDisabled={props.tocDisabled}
