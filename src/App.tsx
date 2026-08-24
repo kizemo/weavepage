@@ -1245,7 +1245,11 @@ const handleSpacingChange = useCallback(
     return () => window.removeEventListener("keydown", handler);
   }, [refreshPreview]);
 
-  if (!editor) return null;
+  // 第三十轮:不再 early return `if (!editor) return null` —
+  // editor 在第一渲染时是 null(react useEditor 异步初始化),
+  // 下面的 useMemo 必须在条件 return 之前调用,否则 hooks 数量不一致
+  // 会触发 React "Invalid hook call" → 整个 App 渲染失败 → 界面空白。
+  // editor 现在已 vestigial(数据层 schema 占位),UI 全部走 iframeRef/docHtml。
 
   const viewClass = viewMode === "page" ? "editor-page" : "editor-wide";
 
