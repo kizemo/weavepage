@@ -1,10 +1,8 @@
-// v0.1.13 第三十轮:Ribbon 接收 iframeRef 替代 editor prop
+// v0.2.0:Ribbon 接收 iframeRef,无 preview 入口(编辑器视图 = WYSIWYG = 浏览器视图,无需预览)
 // - 字体/段落/样式/链接由 RibbonHome 用 iframe.contentDocument.execCommand 实现
 // - 表格/插图/水平线/目录由 RibbonInsert 用 iframe DOM + execCommand 实现
-// - editor 仍然存在(给 TocFloating 用),但 Ribbon 不再依赖
 
 import type { RefObject } from "react";
-import { RibbonButton } from "./controls";
 import { RibbonHome } from "./RibbonHome";
 import { RibbonInsert } from "./RibbonInsert";
 import type { RibbonTab } from "./MenuBar";
@@ -17,8 +15,6 @@ interface RibbonProps {
   disabled: boolean; // 源码视图时禁用
   activeTab: RibbonTab;
   collapsed: boolean;
-  previewActive: boolean;
-  onPreview: () => void;
   onInsertImage: () => void;
   onLink: () => void;
   // 最近颜色(RibbonHome 用),App 层记录用色
@@ -29,23 +25,15 @@ interface RibbonProps {
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
   // RibbonHome 页面背景色回调(由 App.tsx 写到 shell.headCss)
   onPageBgChange: (hex: string) => void;
-  // v0.1.13 第二十七轮:inline doc-toc toggle 按钮状态
   tocEnabled: boolean;
   onToggleToc: () => void;
-  tocDisabled: boolean; // text doc / source 模式禁用
+  tocDisabled: boolean;
 }
 
 export function Ribbon(props: RibbonProps) {
   return (
     <div className="ribbon">
       <div className={`ribbon-body ${props.collapsed ? "collapsed" : ""}`}>
-        <RibbonButton
-          icon="👁"
-          label="网页预览"
-          onClick={props.onPreview}
-          active={props.previewActive}
-          title={props.previewActive ? "退出网页预览" : "打开网页预览 (F5)"}
-        />
         <div className={`ribbon-tab-content ${props.disabled ? "disabled" : ""}`}>
           {props.activeTab === "edit" ? (
             <RibbonHome

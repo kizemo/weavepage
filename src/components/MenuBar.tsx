@@ -4,7 +4,7 @@ type MenuId = "file" | "view" | "help" | "recent" | null;
 type ThemeMode = "system" | "light" | "dark";
 type ViewMode = "page" | "wide";
 export type RibbonTab = "edit" | "insert";
-export type EditMode = "edit" | "source" | "preview";
+export type EditMode = "edit" | "source";
 
 interface MenuBarProps {
   isModified: boolean;
@@ -174,9 +174,6 @@ export function MenuBar(props: MenuBarProps) {
             </button>
             <button onClick={() => { onModeChange("source"); close(); }}>
               源码视图 {mode === "source" ? "✓" : ""}
-            </button>
-            <button onClick={() => { onModeChange("preview"); close(); }}>
-              网页预览 {mode === "preview" ? "✓" : ""}
             </button>
             <div className="menu-sep" />
             <button onClick={() => { onThemeChange("system"); close(); }}>

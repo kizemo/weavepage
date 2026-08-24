@@ -25,7 +25,6 @@ export function StatusBar({
       <div className="status-left">
         <span className="status-item">字数：{wordCount}</span>
         {mode === "source" && <span className="status-item" style={{ color: "var(--accent)" }}>源码模式</span>}
-        {mode === "preview" && <span className="status-item" style={{ color: "var(--accent)" }}>预览模式</span>}
       </div>
       <div className="status-right">
         <button

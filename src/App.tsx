@@ -92,17 +92,12 @@ const scopedCss = (css: string): string =>
     )
     .replace(/position:\s*fixed/gi, "position: absolute");
 
-// 把编辑内容注入原始 HTML 的 body 区域（保留 head/style/script，刷新预览时用）
-const injectBody = (raw: string, bodyHtml: string): string =>
-  raw.replace(/(<body[^>]*>)[\s\S]*?(<\/body>)/i, `$1${bodyHtml}$2`);
+// v0.2.0:injectBody 已不再使用(preview 视图移除)— 保留供将来 use case
+// const injectBody = (raw: string, bodyHtml: string): string =>
+//   raw.replace(/(<body[^>]*>)[\s\S]*?(<\/body>)/i, `$1${bodyHtml}$2`);
 
-// 预览注入脚本：body 可编辑（contenteditable），编辑内容经 postMessage 同步回编辑器
-// 发送前克隆 body 并移除 script/style，避免脚本内容混入编辑文档
-const PREVIEW_EDIT_SCRIPT = `<script id="tiptap-preview-edit">(function(){if(window.parent===window)return;document.body.setAttribute("contenteditable","true");var t=null;document.addEventListener("input",function(){clearTimeout(t);t=setTimeout(function(){try{var c=document.body.cloneNode(true);c.querySelectorAll("script,style").forEach(function(n){n.remove()});window.parent.postMessage({type:"tiptap-preview-edit",html:c.innerHTML},"*")}catch(e){}},400)})})();<\/script>`;
-
-// v0.1.13 第二十六轮:TOC 改为 TocFloating React Portal 方案,
-// 预览视图在 iframe 内不显示浮动目录(用户切回编辑视图即可看到目录);
-// 保留 PREVIEW_EDIT_SCRIPT 让用户在 iframe 内直接编辑 + postMessage 同步到主编辑器
+// v0.2.0:preview 视图已移除 — 编辑器视图 = 浏览器视图(WYSIWYG,完全一致),
+// 不再需要 preview 注入脚本 / previewFrame / previewKey。
 
 const emptyDoc = (id: number): DocState => ({
   id,
@@ -128,7 +123,6 @@ function App() {
     () => (localStorage.getItem(THEME_KEY) as ThemeState) || "system"
   );
   const [mode, setMode] = useState<EditMode>("edit");
-  const [previewKey, setPreviewKey] = useState(0);
   const [rawFullDoc, setRawFullDoc] = useState<string | null>(null);
   const [sourceText, setSourceText] = useState("");
   const [filePath, setFilePath] = useState<string | null>(null);
@@ -1199,35 +1193,9 @@ const handleSpacingChange = useCallback(
   refs.current.open = openFile;
   refs.current.new = newDoc;
   refs.current.close = () => closeDoc(activeId);
-  refs.current.togglePreview = () => {
-    if (activeDoc.kind === "html") changeMode(mode === "preview" ? "edit" : "preview");
-  };
 
-  // 刷新预览：把当前编辑器内容注入原始 HTML 的 body 替换，重载 iframe
-  const refreshPreview = useCallback(() => {
-    if (activeDoc.kind === "text") return;
-    // v0.1.13 第三十轮:用 docHtml 而非 editor.getHTML() — 保留 iframe WYSIWYG 内容
-    setRawFullDoc((prev) => (prev ? injectBody(prev, docHtml) : prev));
-    setMode("preview");
-    setPreviewKey((k) => k + 1);
-  }, [activeDoc, docHtml]);
-
-  // 预览中直接编辑：接收 iframe postMessage，同步回编辑器
-  // 第三十轮:用 docHtml 替代 editor.commands.setContent(后者会 strip WYSIWYG 元素)
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      const data = e.data as { type?: string; html?: string } | null;
-      if (!data || data.type !== "tiptap-preview-edit" || typeof data.html !== "string") return;
-      if (mode !== "preview") return;
-      setDocHtml(data.html);
-      setIsModified(true);
-      updateActiveDoc({ isModified: true });
-      // 同步到预览文档，切走再切回预览时内容一致
-      setRawFullDoc((prev) => (prev ? injectBody(prev, data.html!) : prev));
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [mode, updateActiveDoc]);
+  // v0.2.0:refreshPreview / togglePreview / preview postMessage handler 已移除
+  // (preview 视图不再存在,编辑器视图 = 浏览器视图)
 
   // v0.1.13 第二十六轮:TocFloating.tsx 用 React onMouseEnter/Leave/onClick
 // 处理交互(hover 展开 / 鼠标移开收起 / click 跳转),不再需要 document click 委托
@@ -1254,18 +1222,11 @@ const handleSpacingChange = useCallback(
         e.preventDefault();
         refs.current.close();
       }
-      if (e.key === "F5") {
-        e.preventDefault();
-        refreshPreview();
-      }
-      if (e.key === "F9") {
-        e.preventDefault();
-        refs.current.togglePreview();
-      }
+      // v0.2.0:F5/F9 预览快捷键已移除(预览视图不再存在)
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [refreshPreview]);
+  }, []);
 
   // 第三十轮:不再 early return `if (!editor) return null` —
   // editor 在第一渲染时是 null(react useEditor 异步初始化),
@@ -1295,13 +1256,7 @@ const handleSpacingChange = useCallback(
     [activeDoc.id, shell]
   );
 
-  const basePreview = (rawFullDoc ?? buildFullDoc(docHtml, shell));
-  // v0.1.13 第二十六轮:TOC 由 TocFloating React Portal 渲染(只在编辑视图显示),
-  // 预览 iframe 不再注入 TOC hover/click 处理脚本
-  const previewDoc = basePreview.replace(
-    /<\/body>/i,
-    PREVIEW_EDIT_SCRIPT + "</body>"
-  );
+  // v0.2.0:basePreview / previewDoc 已移除(预览视图不存在,编辑器 = 浏览器)
   const isTextDoc = activeDoc.kind === "text";
   const shownWordCount = isTextDoc ? activeDoc.body.length : wordCount;
 
@@ -1352,8 +1307,6 @@ const handleSpacingChange = useCallback(
         disabled={mode !== "edit" || isTextDoc}
         activeTab={activeTab}
         collapsed={ribbonCollapsed}
-        previewActive={mode === "preview"}
-        onPreview={() => changeMode(mode === "preview" ? "edit" : "preview")}
         onInsertImage={insertImage}
         onLink={setLink}
         recentTextColors={recentColors.text}
@@ -1384,25 +1337,6 @@ const handleSpacingChange = useCallback(
               spellCheck={false}
               wrap="soft"
             />
-          ) : mode === "preview" ? (
-            <>
-              <div className="preview-bar">
-                <span className="preview-bar-title">网页预览 · 可直接编辑</span>
-                <button onClick={refreshPreview} title="将编辑器内容同步到预览 (F5)">
-                  刷新
-                </button>
-                <button onClick={() => changeMode("edit")} title="返回编辑模式">
-                  关闭
-                </button>
-              </div>
-              <iframe
-                key={previewKey}
-                className="preview-frame"
-                srcDoc={previewDoc}
-                title="网页预览"
-                sandbox="allow-scripts"
-              />
-            </>
           ) : mode === "source" ? (
             <textarea
               className="source-view"
