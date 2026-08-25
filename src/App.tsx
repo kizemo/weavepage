@@ -43,7 +43,7 @@ import {
   buildTocStyleTag,
   removeTocStyleTag,
 } from "./utils/tocGen";
-import { formatHtml } from "./utils/formatHtml";
+import { formatHtml, escAttr } from "./utils/formatHtml";
 import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
 import { loadRecentColors, pushRecentColor } from "./utils/recentColors";
 import type { ColorKind, RecentColorsResult } from "./utils/recentColors";
@@ -125,6 +125,10 @@ function App() {
   const [mode, setMode] = useState<EditMode>("edit");
   const [rawFullDoc, setRawFullDoc] = useState<string | null>(null);
   const [sourceText, setSourceText] = useState("");
+  // v2.0.1:进入源代码视图时保存一份 buildFullDoc 产物,退出时对比;
+  // 如果用户没编辑 sourceText(原样切换),就完全不动 docHtml / shell / isModified,
+  // 实现"切换视图不修改任何代码"。否则 formatHtml 即便 escAttr 修好也还会改空白/缩进。
+  const [sourceTextSnapshot, setSourceTextSnapshot] = useState("");
   const [filePath, setFilePath] = useState<string | null>(null);
   const [isModified, setIsModified] = useState(false);
   const [shell, setShell] = useState<DocShell | null>(null);
@@ -323,7 +327,8 @@ function App() {
     };
     const newHead = enabled
       ? (baseShell.head.includes("wp-toc-style")
-          ? baseShell.head
+          // v2.0.3:已有 wp-toc-style 但可能缺注释 — 强制 refresh 确保样式 tag 带标记
+          ? removeTocStyleTag(baseShell.head) + "\n" + buildTocStyleTag()
           : baseShell.head + buildTocStyleTag())
       : removeTocStyleTag(baseShell.head);
     if (newHead !== baseShell.head) {
@@ -373,13 +378,31 @@ function App() {
         if (hasDocTocInHtml(doc.body || "")) {
           const entries = scanHeadingsFromHtml(doc.body);
           const newHtml = assignHeadingIdsInHtml(doc.body, entries);
-          setDocHtml(newHtml);
+          // v2.0.3:重生成 tocHtml 结构,确保注释标记 / 最新 buildTocHtml 输出
+          // 应用到旧文件(老版本 WeavePage 保存的 TOC 没有注释)
+          const refreshed = toggleDocTocInHtml(newHtml); // off
+          const final = toggleDocTocInHtml(refreshed.html); // on
+          setDocHtml(final.html);
+          // v2.0.3:同样刷新 shell.head 里的 style tag(老版本没注释),
+          // 否则源代码视图 <head> 区域不会看到 <!-- WeavePage TOC: 样式 -->
+          const baseShell: DocShell = {
+            doctype: doc.shell?.doctype ?? "<!DOCTYPE html>",
+            head: doc.shell?.head ?? "",
+            headCss: doc.shell?.headCss ?? "",
+            bodyAttrs: doc.shell?.bodyAttrs ?? "",
+            scripts: doc.shell?.scripts ?? "",
+            styles: doc.shell?.styles ?? "",
+            baseHref: doc.shell?.baseHref ?? "",
+          };
+          const refreshedHead = removeTocStyleTag(baseShell.head) + "\n" + buildTocStyleTag();
+          setShell({ ...baseShell, head: refreshedHead });
+        } else {
+          setShell(doc.shell ?? null);
         }
         // editor 仍 setContent(保留给将来 stage 5 切换,但不影响 docHtml)
         editor?.commands.setContent(doc.body || "<p></p>");
         setMode(doc.mode);
         setSourceText(doc.sourceText);
-        setShell(doc.shell);
         setRawFullDoc(doc.rawFullDoc);
         setWordCount(editor ? editor.getText().replace(/\s+/g, "").length : 0);
       } else {
@@ -547,7 +570,7 @@ function App() {
         .map((s) => s.textContent ?? "")
         .join("\n");
       const bodyAttrs = Array.from(doc.body.attributes)
-        .map((a) => ` ${a.name}="${a.value}"`)
+        .map((a) => ` ${a.name}="${escAttr(a.value)}"`)
         .join("");
       const collect = (tag: string) =>
         Array.from(doc.body.querySelectorAll(tag))
@@ -742,7 +765,7 @@ ${sh.styles}
         .map((s) => s.textContent ?? "")
         .join("\n");
       const bodyAttrs = Array.from(doc.body.attributes)
-        .map((a) => ` ${a.name}="${a.value}"`)
+        .map((a) => ` ${a.name}="${escAttr(a.value)}"`)
         .join("");
       const collect = (tag: string) =>
         Array.from(doc.body.querySelectorAll(tag))
@@ -935,23 +958,34 @@ ${sh.styles}
       if (!editor) return;
       if (activeDoc.kind === "text") return; // 文本标签只有文本编辑
       if (next === mode) return;
+      // 源码 → 编辑:只有 sourceText 真正变化才 syncFromSource,否则跳过一切修改
+      //(保证"打开源代码视图看一眼,关掉"完全不修改 docHtml / shell / isModified)
       if (mode === "source") {
-        try {
-          syncFromSource(sourceText, true);
-        } catch (e) {
-          console.error("源码解析失败:", e);
-          window.alert("源码解析失败，请检查 HTML 语法");
-          return;
+        if (sourceText !== sourceTextSnapshot) {
+          try {
+            syncFromSource(sourceText, true);
+          } catch (e) {
+            console.error("源码解析失败:", e);
+            window.alert("源码解析失败，请检查 HTML 语法");
+            return;
+          }
+        } else {
+          // 未编辑:还原 isModified 标记(进入源码视图前可能是 modified,这里不能改 docHtml)
+          // 不动 docHtml / shell — 这就是"零修改"路径
         }
       }
       if (next === "source") {
         // 源码视图显示完整页面（head 部分、CSS、JS 全部可见可编辑）
-        // v0.1.13 第三十轮:用 docHtml 保留 iframe WYSIWYG 内容
-        setSourceText(formatHtml(buildFullDoc(docHtml, shell)));
+        // v2.0.1:formatHtml 只调整空白(块级缩进/换行),不修改任何字符。
+        // 配合 sourceTextSnapshot,未编辑切回时直接跳过 syncFromSource,实现
+        // "切换视图不修改任何代码"。
+        const newSourceText = formatHtml(buildFullDoc(docHtml, shell));
+        setSourceText(newSourceText);
+        setSourceTextSnapshot(newSourceText);
       }
       setMode(next);
     },
-    [editor, activeDoc, mode, sourceText, syncFromSource, buildFullDoc, shell]
+    [editor, activeDoc, mode, sourceText, sourceTextSnapshot, syncFromSource, buildFullDoc, shell]
   );
 
   // ---- 右键：弹出 EditorContextMenu(块源码 / 设为默认样式) ----

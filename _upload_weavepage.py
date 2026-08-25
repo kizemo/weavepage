@@ -28,8 +28,8 @@ REMOTE_BASE = "/var/www/wordpress/weavepage"
 
 # 待上传的 installer 文件名列表(完整双渠道)
 FILES_TO_UPLOAD = [
-    "WeavePage_0.1.13_x64-setup.exe",
-    "WeavePage_0.1.13_x64-update.exe",
+    "WeavePage_2.0.6_x64-setup.exe",
+    "WeavePage_2.0.6_x64-update.exe",
 ]
 
 

@@ -172,31 +172,79 @@ const TOC_SCRIPT = `
   });
 
   // h2-item hover → 找到对应 submenu 并显示 + 动态对齐 top
+  // v2.0.1:鼠标从 h2-item 移到 h3-submenu 时,中间有 ~8px 间隙(margin-right),
+  // 原来 submenu.contains(relatedTarget) 检测会在间隙内失败,瞬间关闭子菜单。
+  // v2.0.2:延长关闭延迟到 1500ms(用户反馈 350ms 反向移动 h3→h2 偶尔还消失),
+  // 同时给所有 submenu 也挂 mouseenter/mouseleave(它们的 bbox 在 wrap 外,
+  // wrap.mouseleave 触发时鼠标可能在 submenu 上,submenu 自己 enter 才能取消 close)。
+  // v2.0.2:h2-item enter 时关闭所有其他 submenu,只显示当前一个(避免多 submenu 同时显示)。
+  // v2.0.5:再延长到 2000ms + h2-item 加 is-active class — 子菜单打开时对应的 h2-item
+  // 保持高亮,即使鼠标离开也不"消失"(用户:只要子菜单存在,h2 菜单就不应消失)
+  // v2.0.6:加 wrap.has-submenu-open class — 子菜单打开时面板必须显示
+  //(之前依赖 wrap:hover,鼠标移到 wrap 外面板就看不到,只剩按钮)
+  var CLOSE_DELAY_MS = 2000;
+  var closeTimer = null;
+
+  var cancelClose = function() {
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+  };
+  // 同步 wrap 上的"是否有 submenu 打开"标记 — CSS 用 .has-submenu-open 显示面板
+  var syncWrapOpenClass = function() {
+    var hasOpen = wrap.querySelector('.wp-toc-h3-submenu.is-open') !== null;
+    if (hasOpen) {
+      wrap.classList.add('has-submenu-open');
+    } else {
+      wrap.classList.remove('has-submenu-open');
+    }
+  };
+  var scheduleClose = function() {
+    cancelClose();
+    closeTimer = setTimeout(function() {
+      // 同时清除 is-active(子菜单关掉,h2-item 也不再高亮)
+      Array.prototype.forEach.call(wrap.querySelectorAll('.wp-toc-h3-submenu.is-open'), function(s) {
+        s.classList.remove('is-open');
+      });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.wp-toc-h2-item.is-active'), function(item) {
+        item.classList.remove('is-active');
+      });
+      syncWrapOpenClass();
+      closeTimer = null;
+    }, CLOSE_DELAY_MS);
+  };
+
+  // wrap mouseenter/mouseleave — wrap 自身 bbox 内(按钮 + panel)
+  wrap.addEventListener('mouseenter', cancelClose);
+  wrap.addEventListener('mouseleave', scheduleClose);
+
+  // 所有 submenu(在 wrap 外,但 DOM 是 wrap 子节点)— 单独监听 enter/leave
+  Array.prototype.forEach.call(wrap.querySelectorAll('.wp-toc-h3-submenu'), function(submenu) {
+    submenu.addEventListener('mouseenter', cancelClose);
+    submenu.addEventListener('mouseleave', scheduleClose);
+  });
+
+  // h2-item hover:关闭其他 submenu + 取消其他 is-active,显示自己 + 自己激活
   var h2Items = wrap.querySelectorAll('.wp-toc-h2-item');
   Array.prototype.forEach.call(h2Items, function(h2Item) {
     var targetId = h2Item.getAttribute('data-target');
     var submenu = wrap.querySelector('.wp-toc-h3-submenu[data-for="' + targetId + '"]');
     if (!submenu) return;
+
     h2Item.addEventListener('mouseenter', function() {
+      cancelClose();
+      // 关闭其他 submenu + 取消其他 is-active
+      Array.prototype.forEach.call(wrap.querySelectorAll('.wp-toc-h3-submenu.is-open'), function(s) {
+        if (s !== submenu) s.classList.remove('is-open');
+      });
+      Array.prototype.forEach.call(wrap.querySelectorAll('.wp-toc-h2-item.is-active'), function(item) {
+        if (item !== h2Item) item.classList.remove('is-active');
+      });
       var wrapRect = wrap.getBoundingClientRect();
       var itemRect = h2Item.getBoundingClientRect();
       // top 相对 wrap 的容器(viewport - wrapRect.top)
       submenu.style.top = (itemRect.top - wrapRect.top) + 'px';
       submenu.classList.add('is-open');
-    });
-    h2Item.addEventListener('mouseleave', function(e) {
-      // 鼠标进入 submenu 不关闭
-      if (submenu.contains(e.relatedTarget)) return;
-      submenu.classList.remove('is-open');
-    });
-    // submenu mouseleave → 如果进入 h2-item 不关闭
-    submenu.addEventListener('mouseleave', function(e) {
-      if (h2Item.contains(e.relatedTarget)) return;
-      submenu.classList.remove('is-open');
-    });
-    // submenu mouseenter → 加 open class(防止 mouseleave 把 is-open 移除后丢失)
-    submenu.addEventListener('mouseenter', function() {
-      submenu.classList.add('is-open');
+      h2Item.classList.add('is-active');
+      syncWrapOpenClass();
     });
   });
 
@@ -271,7 +319,10 @@ const TOC_CSS = `
   box-sizing: border-box;
 }
 .wp-toc-floating-wrap:hover .wp-toc-floating-panel,
-.wp-toc-floating-panel.is-open {
+.wp-toc-floating-panel.is-open,
+/* v2.0.6:子菜单打开时,面板也必须显示 — 否则鼠标从子菜单返回 wrap 间隙
+   会让面板消失,只剩按钮可见(h2-item 无法点击) */
+.wp-toc-floating-wrap.has-submenu-open .wp-toc-floating-panel {
   display: block;
 }
 .wp-toc-panel-header {
@@ -304,7 +355,8 @@ const TOC_CSS = `
   transition: all 0.12s ease;
   box-sizing: border-box;
 }
-.wp-toc-h2-item:hover > .wp-toc-h2-link {
+.wp-toc-h2-item:hover > .wp-toc-h2-link,
+.wp-toc-h2-item.is-active > .wp-toc-h2-link {
   background: #f0f4f8;
   color: #1a56db;
   border-left-color: #1a56db;
@@ -354,11 +406,18 @@ const TOC_CSS = `
 `;
 
 // 把 TOC_CSS 包成 <style> 标签(含 id 标识,便于 toggling 时按 id 移除)
+// v2.0.2:前后加 HTML 注释标记,方便用户在源代码视图识别 / 编辑
 export function buildTocStyleTag(): string {
-  return `<style id="wp-toc-style">\n${TOC_CSS}\n</style>`;
+  return (
+    `<!-- WeavePage TOC: 样式(可编辑) -->\n` +
+    `<style id="wp-toc-style">\n${TOC_CSS}\n</style>\n` +
+    `<!-- /WeavePage TOC: 样式 -->`
+  );
 }
 
 // 从 head 字符串里移除 TOC style 标签(按 id 标识)
+// 注意:不能直接用注释包裹判断 — 注释里的 <style> 也会被 regex 匹配
+// 仅匹配真正的 <style id="wp-toc-style">...</style>
 export function removeTocStyleTag(head: string): string {
   return head.replace(/<style\s+id=["']wp-toc-style["']>[\s\S]*?<\/style>/gi, "");
 }
@@ -409,7 +468,11 @@ export function buildTocHtml(entries: TocEntry[]): string {
     i = j;
   }
 
+  // v2.0.4:HTML 注释完整包住 doc-toc 外层 + wp-toc-floating-wrap + script
+  // (之前只包了 wrap,doc-toc 外层 div 没在注释里)
   return (
+    `<!-- WeavePage TOC: 结构(可编辑) -->\n` +
+    `<div class="doc-toc" data-toc="1" data-doc-toc="1">\n` +
     `<div class="wp-toc-floating-wrap">` +
     `<button class="wp-toc-floating-btn" type="button">` +
     `<span aria-hidden="true">📑</span>` +
@@ -421,8 +484,14 @@ export function buildTocHtml(entries: TocEntry[]): string {
     `<ul class="wp-toc-h2-list">${h2ListItems.join("")}</ul>` +
     `</div>` +
     submenuElements.join("") +
-    `</div>` +
-    `<script>${TOC_SCRIPT}</script>`
+    `</div>\n` +
+    `</div>\n` +
+    `<!-- /WeavePage TOC: 结构 -->\n` +
+    `<script>\n` +
+    `// WeavePage TOC: 行为脚本(可编辑)\n` +
+    `${TOC_SCRIPT}\n` +
+    `// /WeavePage TOC\n` +
+    `</script>`
   );
 }
 
@@ -583,17 +652,12 @@ export function toggleDocTocInHtml(html: string): { html: string; enabled: boole
 }
 
 /** 在 docHtml 字符串开头插入 doc-toc atom(完整 HTML 形式,不依赖 Tiptap) */
+// v2.0.4:buildTocHtml 已经包了 <div class="doc-toc"> + 注释,这里直接插入
 export function insertDocTocInHtml(html: string, tocHtml: string): string {
-  // 构造 doc-toc 节点(参考 DocToc extension renderHTML):
-  // <div class="doc-toc" data-toc="1"><div class="wp-toc-floating-wrap">...</div></div>
-  // 内层 wrap 由 buildTocHtml 提供;DocToc atom 自身只承担 schema 占位角色
-  const tocNode = `<div class="doc-toc" data-toc="1" data-doc-toc="1">${tocHtml}</div>`;
-  // 插到 body 最前(若有 <body> 标签则在 body 开头;否则 prepend)
-  // parseHtml 用 text/html 总是有 body
   const doc = parseHtml(html);
   const body = doc.body;
-  if (!body) return tocNode + html;
-  body.insertAdjacentHTML("afterbegin", tocNode);
+  if (!body) return tocHtml + html;
+  body.insertAdjacentHTML("afterbegin", tocHtml);
   return doc.body.innerHTML;
 }
 

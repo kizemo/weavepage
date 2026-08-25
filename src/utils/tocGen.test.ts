@@ -253,6 +253,17 @@ test("buildTocHtml 含 wrap + button + panel + h2-item + h3-submenu(作为 wrap 
   assert.match(html, /<script>[\s\S]*wrap\.addEventListener\('click'/);
   // script 内不再有 style.display 修改(全部走 class)
   assert.doesNotMatch(html, /\.style\.display/);
+  // v2.0.4:HTML 注释完整包住 doc-toc 外层 + wp-toc-floating-wrap + script
+  // 用户反馈:之前注释只包 wrap,doc-toc 容器没被注释包含
+  const startIdx = html.indexOf("<!-- WeavePage TOC: 结构");
+  const endIdx = html.indexOf("<!-- /WeavePage TOC: 结构");
+  assert.ok(startIdx >= 0 && endIdx > startIdx, "必须含结构起止注释\n输出:\n" + html);
+  const wrapped = html.slice(startIdx, endIdx);
+  assert.match(wrapped, /<div class="doc-toc"/, "doc-toc 外层 div 必须在注释之间\n输出:\n" + html);
+  assert.match(wrapped, /<div class="wp-toc-floating-wrap">/, "wp-toc-floating-wrap 必须在注释之间\n输出:\n" + html);
+  // script 在注释之后(避免 HTML 注释语法错误)
+  const scriptIdx = html.indexOf("<script>");
+  assert.ok(scriptIdx > endIdx, "script 必须在结构注释之后\n输出:\n" + html);
 });
 
 test("buildTocHtml 空 entries 也生成有效 HTML(无 h2 list 但 wrap 结构存在)", () => {
@@ -269,11 +280,13 @@ test("buildTocHtml 空 entries 也生成有效 HTML(无 h2 list 但 wrap 结构�
 
 // buildTocStyleTag / removeTocStyleTag / hasTocStyleTag
 import { buildTocStyleTag, removeTocStyleTag, hasTocStyleTag } from "./tocGen";
-test("buildTocStyleTag 生成 <style id=\"wp-toc-style\"> 标签", () => {
+test("buildTocStyleTag 生成 <style id=\"wp-toc-style\"> 标签 + 注释标记", () => {
   const tag = buildTocStyleTag();
+  assert.match(tag, /<!--\s*WeavePage TOC:\s*样式/);
   assert.match(tag, /<style id="wp-toc-style">/);
+  assert.match(tag, /<\/style>/);
+  assert.match(tag, /<!--\s*\/WeavePage TOC/);
   assert.match(tag, /wp-toc-floating-wrap/);
-  assert.match(tag, /<\/style>$/);
 });
 test("removeTocStyleTag 从 head 字符串里移除 wp-toc-style 块", () => {
   const head = "<meta><style id='wp-toc-style'>body{}</style><title>t</title>";
