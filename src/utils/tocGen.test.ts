@@ -283,7 +283,8 @@ import { buildTocStyleTag, removeTocStyleTag, hasTocStyleTag } from "./tocGen";
 test("buildTocStyleTag 生成 <style id=\"wp-toc-style\"> 标签 + 注释标记", () => {
   const tag = buildTocStyleTag();
   assert.match(tag, /<!--\s*WeavePage TOC:\s*样式/);
-  assert.match(tag, /<style id="wp-toc-style">/);
+  // v2.1.0:允许 id 后面跟 data-weavepage-toc 属性(不强制 > 紧贴 id)
+  assert.match(tag, /<style id="wp-toc-style"/);
   assert.match(tag, /<\/style>/);
   assert.match(tag, /<!--\s*\/WeavePage TOC/);
   assert.match(tag, /wp-toc-floating-wrap/);
@@ -299,4 +300,14 @@ test("hasTocStyleTag 检测 head 是否含 wp-toc-style", () => {
   assert.equal(hasTocStyleTag("<style id='wp-toc-style'>x</style>"), true);
   assert.equal(hasTocStyleTag("<style>x</style>"), false);
   assert.equal(hasTocStyleTag(""), false);
+});
+
+// v2.1.0 Task 1:buildTocStyleTag 输出加 data-weavepage-toc 属性
+// 便于 design CSS 注入时找锚点(同时保留 id 不破坏 removeTocStyleTag / hasTocStyleTag)
+test("buildTocStyleTag 输出含 data-weavepage-toc 属性", () => {
+  const out = buildTocStyleTag();
+  // 新增:data-weavepage-toc 属性(便于 design CSS 注入锚点)
+  assert.match(out, /<style\s+id="wp-toc-style"\s+data-weavepage-toc>/);
+  // 保留:id 仍存在(不破坏 removeTocStyleTag / hasTocStyleTag)
+  assert.match(out, /<style\s+id="wp-toc-style"/);
 });

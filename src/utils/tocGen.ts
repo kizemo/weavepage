@@ -407,10 +407,11 @@ const TOC_CSS = `
 
 // 把 TOC_CSS 包成 <style> 标签(含 id 标识,便于 toggling 时按 id 移除)
 // v2.0.2:前后加 HTML 注释标记,方便用户在源代码视图识别 / 编辑
+// v2.1.0:加 data-weavepage-toc 属性,作为设计 CSS 注入锚点(id 保留不破坏 removeTocStyleTag / hasTocStyleTag)
 export function buildTocStyleTag(): string {
   return (
     `<!-- WeavePage TOC: 样式(可编辑) -->\n` +
-    `<style id="wp-toc-style">\n${TOC_CSS}\n</style>\n` +
+    `<style id="wp-toc-style" data-weavepage-toc>\n${TOC_CSS}\n</style>\n` +
     `<!-- /WeavePage TOC: 样式 -->`
   );
 }
