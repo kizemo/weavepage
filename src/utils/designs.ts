@@ -397,8 +397,9 @@ export function applyDesignToShellHead(
   if (tocMatch) {
     return next.replace(tocMatch[1], `${tocMatch[1]}\n${styleTag}`);
   }
-  // 兜底:没找到 toc style → 插到 </head> 之前
-  return next.replace("</head>", `${styleTag}\n</head>`);
+  // 兜底:没找到 toc style → 追加到 head(innerHTML)末尾
+  // 注意:sh.head 是 <head>...</head> 的 innerHTML,不含 </head> 字符串
+  return next ? `${next}\n${styleTag}` : styleTag;
 }
 
 // 从 shell.head 解析当前设计 id(取第一个 data-weavepage-design 的 value)

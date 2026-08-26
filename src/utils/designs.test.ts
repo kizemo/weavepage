@@ -57,13 +57,17 @@ test("applyDesignToShellHead 有 toc style 时插在它之后", () => {
   assert.ok(out.includes('data-weavepage-design="modern-minimalist"'));
 });
 
-test("applyDesignToShellHead 无 toc style 时插到 </head> 之前", () => {
-  const head = `<head><meta charset="utf-8"></head>`;
+test("applyDesignToShellHead 无 toc style 时追加到 head(innerHTML)末尾", () => {
+  // sh.head 是 <head>...</head> 的 innerHTML,不含 </head> 字符串
+  const head = `<meta charset="utf-8">`;
   const out = applyDesignToShellHead(head, "tech-dark", "BODY{}");
-  const headClose = out.indexOf("</head>");
+  // design style 必须存在
+  assert.ok(out.includes("BODY{}"));
+  assert.ok(out.includes('data-weavepage-design="tech-dark"'));
+  // design style 必须出现在 head 文本末尾(meta 之后)
   const designIdx = out.indexOf("data-weavepage-design");
-  assert.ok(designIdx > -1);
-  assert.ok(designIdx < headClose, "design 必须在 </head> 之前");
+  const metaIdx = out.indexOf("meta");
+  assert.ok(metaIdx > -1 && designIdx > metaIdx, "design 必须在 meta 之后(head 末尾追加)");
 });
 
 test("applyDesignToShellHead 替换旧 design(不叠加)", () => {
