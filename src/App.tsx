@@ -64,7 +64,6 @@ import {
 import { applyBodyBackground } from "./utils/headShell";
 // v2.1.0:文档设计 — 8 套预设样式 + 默认(纯内存,不持久化)
 import {
-  DESIGNS,
   getDesignById,
   applyDesignToShellHead,
   parseDesignId,
@@ -1333,12 +1332,6 @@ const handleSpacingChange = useCallback(
   const isTextDoc = activeDoc.kind === "text";
   const shownWordCount = isTextDoc ? activeDoc.body.length : wordCount;
 
-  // v2.1.0:Task 6 scaffolding — Task 7 wires these into <Ribbon> props
-  // void references keep tsc noUnusedLocals quiet until then
-  void DESIGNS;
-  void currentDesignId;
-  void applyDesign;
-
   return (
     <div className="editor-container">
       {/* 标题栏 */}
@@ -1396,6 +1389,9 @@ const handleSpacingChange = useCallback(
         tocEnabled={tocEnabled}
         onToggleToc={onToggleToc}
         tocDisabled={mode !== "edit" || isTextDoc}
+        currentDesignId={currentDesignId}
+        onApplyDesign={applyDesign}
+        designDisabled={mode !== "edit" || isTextDoc}
       />
 
       {/* 主区域：侧边栏 + 内容 */}

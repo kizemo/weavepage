@@ -28,6 +28,10 @@ interface RibbonProps {
   tocEnabled: boolean;
   onToggleToc: () => void;
   tocDisabled: boolean;
+  // v2.1.0:设计子菜单
+  currentDesignId: string | null;
+  onApplyDesign: (id: string | null) => void;
+  designDisabled: boolean;
 }
 
 export function Ribbon(props: RibbonProps) {
@@ -44,6 +48,9 @@ export function Ribbon(props: RibbonProps) {
               onColorUsed={props.onColorUsed}
               onSpacingChange={props.onSpacingChange}
               onPageBgChange={props.onPageBgChange}
+              currentDesignId={props.currentDesignId}
+              onApplyDesign={props.onApplyDesign}
+              designDisabled={props.designDisabled}
             />
           ) : (
             <RibbonInsert

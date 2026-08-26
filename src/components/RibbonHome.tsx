@@ -7,6 +7,7 @@
 import { useCallback, type RefObject } from "react";
 import { GroupTitle, RibbonButton, SelectControl } from "./controls";
 import { ColorPicker } from "./ColorPicker";
+import { RibbonDesign } from "./RibbonDesign";
 import { FONT_FAMILIES, FONT_SIZES, TEXT_COLORS, HIGHLIGHT_COLORS, PAGE_BG_COLORS } from "../utils/fonts";
 import {
   LINE_HEIGHT_OPTIONS,
@@ -31,6 +32,10 @@ interface RibbonHomeProps {
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
   // 页面背景色回调(由 App.tsx 写到 shell.headCss)
   onPageBgChange: (hex: string) => void;
+  // v2.1.0:设计子菜单
+  currentDesignId: string | null;
+  onApplyDesign: (id: string | null) => void;
+  designDisabled: boolean;
 }
 
 export function RibbonHome({
@@ -41,6 +46,9 @@ export function RibbonHome({
   onColorUsed,
   onSpacingChange,
   onPageBgChange,
+  currentDesignId,
+  onApplyDesign,
+  designDisabled,
 }: RibbonHomeProps) {
   // 选区/光标变化都重新派生格式状态(Ribbon 实时高亮按钮)
   const fmt = useIframeFormatState(iframeRef);
@@ -352,6 +360,13 @@ export function RibbonHome({
           onClick={onLink}
         />
       </div>
+
+      {/* 设计组 */}
+      <RibbonDesign
+        currentDesignId={currentDesignId}
+        onApply={onApplyDesign}
+        disabled={designDisabled}
+      />
     </>
   );
 }
