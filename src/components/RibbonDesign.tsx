@@ -15,17 +15,35 @@ const SAMPLE_HTML = `
 <p>行内 <code>code</code> 与 <kbd>Ctrl</kbd> 演示。</p>
 `;
 
+// 缩略图内部小字体规则(iframe srcdoc 内 .design-thumb-body 命中)
+const THUMB_BODY_CSS = `
+body { margin: 0; }
+.design-thumb-body { font-size: 6px; line-height: 1.4; padding: 8px 10px; }
+.design-thumb-body h1 { font-size: 10px; margin: 2px 0; }
+.design-thumb-body h2 { font-size: 9px; margin: 2px 0; }
+.design-thumb-body h3 { font-size: 8px; margin: 2px 0; }
+.design-thumb-body p { margin: 2px 0; }
+.design-thumb-body blockquote { margin: 2px 0; padding: 2px 6px; }
+.design-thumb-body pre { margin: 2px 0; padding: 3px 4px; font-size: 5px; }
+.design-thumb-body table { font-size: 5px; }
+.design-thumb-body td, .design-thumb-body th { padding: 1px 3px; }
+.design-thumb-body ul { padding-left: 12px; margin: 1px 0; }
+.design-thumb-body hr { margin: 2px 0; }
+.design-thumb-body img { max-width: 100%; height: auto; }
+`;
+
 interface DesignThumbProps {
   design: DesignMeta | null; // null = "默认"卡
   selected: boolean;
   onClick: () => void;
 }
 
+// 构造缩略图 iframe srcdoc(iframe 自带 CSS 隔离,9 个 design 各自独立 CSS 域,不会冲突)
+function buildThumbSrcDoc(design: DesignMeta): string {
+  return `<!DOCTYPE html><html><head><style>${THUMB_BODY_CSS}\n${design.css}</style></head><body class="design-thumb-body">${SAMPLE_HTML}</body></html>`;
+}
+
 function DesignThumb({ design, selected, onClick }: DesignThumbProps) {
-  // 缩略图内部样式:用 design.css(默认卡不注入)
-  const innerStyle = design ? (
-    <style dangerouslySetInnerHTML={{ __html: design.css }} />
-  ) : null;
   return (
     <button
       type="button"
@@ -33,13 +51,27 @@ function DesignThumb({ design, selected, onClick }: DesignThumbProps) {
       onClick={onClick}
       title={design ? design.name : "默认(无设计样式)"}
     >
-      <div className="design-thumb-frame">
-        {innerStyle}
-        <div
-          className="design-thumb-body"
-          style={{ fontFamily: design?.fontFamily ?? "serif" }}
-          dangerouslySetInnerHTML={{ __html: SAMPLE_HTML }}
-        />
+      <div
+        className="design-thumb-frame"
+        style={{
+          background: design?.preview.bg ?? "#ffffff",
+        }}
+      >
+        {design ? (
+          <iframe
+            className="design-thumb-iframe"
+            title={design.name}
+            sandbox=""
+            srcDoc={buildThumbSrcDoc(design)}
+          />
+        ) : (
+          // 默认卡:不嵌 iframe,直接渲染样例 HTML(浏览器默认样式 + serif)
+          <div
+            className="design-thumb-body default"
+            style={{ fontFamily: "serif" }}
+            dangerouslySetInnerHTML={{ __html: SAMPLE_HTML }}
+          />
+        )}
       </div>
       <span className="design-thumb-name">{design ? design.name : "默认"}</span>
     </button>
