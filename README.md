@@ -77,7 +77,7 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ## 🚀 安装
 
-1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_0.1.3_x64-setup.exe`
+1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_2.1.0_x64-setup.exe`
 2. 双击安装（自动安装 WebView2 运行时，全程无需联网）
 3. 从开始菜单启动 **WeavePage**
 
@@ -87,13 +87,13 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ```
 # NSIS 安装包 (~209 MB)
-sha256: b18976fc5ed781a3ca20bd9d561893d175a2f676303157f359cb2d08795ce13d
+sha256: 58d96721e384da17fee9a1b298271f0ade1855ddd9db870ab1070d87fd1460b9
 
-# MSI 安装包 (~208 MB)
-sha256: 51006b5f03b68e8f7cf311153c0b030069b2c18fa1a953fc927cf7f18d37c172
+# NSIS 应用内升级包 (~5.4 MB,仅供 WeavePage 应用内升级使用)
+sha256: c90459b56bc67b1795759efe368f728a7feb138e8aa4aeccf35f23fc869be97e
 ```
 
-Windows 验证：`certutil -hashfile WeavePage_0.1.3_x64-setup.exe SHA256`
+Windows 验证：`certutil -hashfile WeavePage_2.1.0_x64-setup.exe SHA256`
 
 ## 📖 使用指南
 
@@ -152,6 +152,12 @@ pnpm release        # 打包安装程序到 release/ 目录
 - 演示文档见 [`assets/demo/demo.html`](assets/demo/demo.html)，下载后可直接用 WeavePage 打开体验
 
 ## 📋 变更日志
+
+### v2.1.0 — 2026-08-26
+- **新增 文档设计子菜单**:Ribbon「设计」按钮组,弹出 16:9 缩略图面板(8 套预设 + 默认)。8 套风格:**经典学术 / 现代简约 / 文艺书卷 / 科技感 / 商务正式 / 柔雅 / 薄荷清新 / 复古印刷**;每张缩略图用 iframe srcdoc 隔离 CSS,真实显示各自设计效果
+- **新增 设计样式持久化**:选中的 design CSS 注入 `<style data-weavepage-design="X">` 到 `<head>`,写入 HTML 文件本身;保存重开自动恢复;目录样式跟随主风格
+- **修复 applyDesign 失效**:`sh.head` 是 `<head>` 的 innerHTML,旧 `replace("</head>", ...)` 永远找不到,改为追加到 head 末尾
+- **修复 9 张缩略图 CSS 冲突**:原 unscoped `<style>` 9 张共存时 last-wins,全部一样;改用 iframe srcdoc 各自隔离
 
 ### v0.1.2 — 2026-08-16
 - 新增 文件菜单「打开最近 ▶」二级子菜单，默认保存最近 10 个工作文档，附「清除」按钮
