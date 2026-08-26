@@ -1,10 +1,12 @@
 // v0.2.0:Ribbon 接收 iframeRef,无 preview 入口(编辑器视图 = WYSIWYG = 浏览器视图,无需预览)
 // - 字体/段落/样式/链接由 RibbonHome 用 iframe.contentDocument.execCommand 实现
 // - 表格/插图/水平线/目录由 RibbonInsert 用 iframe DOM + execCommand 实现
+// v2.2.0:增加 activeTab === "design" 分支,渲染 DesignStrip(9 张缩略图横排)
 
 import type { RefObject } from "react";
 import { RibbonHome } from "./RibbonHome";
 import { RibbonInsert } from "./RibbonInsert";
+import { DesignStrip } from "./DesignStrip";
 import type { RibbonTab } from "./MenuBar";
 
 export type ViewMode = "page" | "wide";
@@ -28,7 +30,7 @@ interface RibbonProps {
   tocEnabled: boolean;
   onToggleToc: () => void;
   tocDisabled: boolean;
-  // v2.1.0:设计子菜单
+  // v2.2.0:设计顶级 tab(从 RibbonHome 移过来)
   currentDesignId: string | null;
   onApplyDesign: (id: string | null) => void;
   designDisabled: boolean;
@@ -39,7 +41,7 @@ export function Ribbon(props: RibbonProps) {
     <div className="ribbon">
       <div className={`ribbon-body ${props.collapsed ? "collapsed" : ""}`}>
         <div className={`ribbon-tab-content ${props.disabled ? "disabled" : ""}`}>
-          {props.activeTab === "edit" ? (
+          {props.activeTab === "edit" && (
             <RibbonHome
               iframeRef={props.iframeRef}
               onLink={props.onLink}
@@ -48,17 +50,22 @@ export function Ribbon(props: RibbonProps) {
               onColorUsed={props.onColorUsed}
               onSpacingChange={props.onSpacingChange}
               onPageBgChange={props.onPageBgChange}
-              currentDesignId={props.currentDesignId}
-              onApplyDesign={props.onApplyDesign}
-              designDisabled={props.designDisabled}
             />
-          ) : (
+          )}
+          {props.activeTab === "insert" && (
             <RibbonInsert
               iframeRef={props.iframeRef}
               onInsertImage={props.onInsertImage}
               tocEnabled={props.tocEnabled}
               onToggleToc={props.onToggleToc}
               tocDisabled={props.tocDisabled}
+            />
+          )}
+          {props.activeTab === "design" && (
+            <DesignStrip
+              currentDesignId={props.currentDesignId}
+              onApply={props.onApplyDesign}
+              disabled={props.designDisabled}
             />
           )}
         </div>

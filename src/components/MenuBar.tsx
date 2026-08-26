@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 type MenuId = "file" | "view" | "help" | "recent" | null;
 type ThemeMode = "system" | "light" | "dark";
 type ViewMode = "page" | "wide";
-export type RibbonTab = "edit" | "insert";
+export type RibbonTab = "edit" | "insert" | "design";
 export type EditMode = "edit" | "source";
 
 interface MenuBarProps {
@@ -154,6 +154,14 @@ export function MenuBar(props: MenuBarProps) {
       </button>
       <button className={`ribbon-tab ${activeTab === "insert" ? "active" : ""}`} onClick={() => onTabChange("insert")}>
         插入
+      </button>
+      <button
+        className={`ribbon-tab ${activeTab === "design" ? "active" : ""}`}
+        onClick={() => onTabChange("design")}
+        disabled={mode === "source"}
+        title={mode === "source" ? "请切换到编辑视图" : "文档设计(8 套预设 + 默认)"}
+      >
+        设计
       </button>
 
       <div className="menu-item">
