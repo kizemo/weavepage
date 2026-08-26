@@ -62,6 +62,13 @@ import {
   blockTypeToSelector,
 } from "./utils/defaultStyle";
 import { applyBodyBackground } from "./utils/headShell";
+// v2.1.0:文档设计 — 8 套预设样式 + 默认(纯内存,不持久化)
+import {
+  DESIGNS,
+  getDesignById,
+  applyDesignToShellHead,
+  parseDesignId,
+} from "./utils/designs";
 // v0.1.13 第十五轮:TOC_STYLES / TOC_FLOATING_SCRIPT 已不再使用 — inline docToc atom 自包含 <style> + <script>
 import "./App.css";
 
@@ -157,6 +164,9 @@ function App() {
   // Tiptap state 仅作为 schema 容器供 TocFloating/tocGen 使用,save/preview/export 全部走 docHtml。
   // 必须在 useEditor 之前声明 — snapshotActive/applyDoc 都要读它。
   const [docHtml, setDocHtml] = useState<string>("<p></p>");
+  // v2.1.0:文档设计 — 纯内存 state,不持久化到 localStorage / DocState
+  // 设计 CSS 注入 shell.head(由 buildFullDoc 自动包含在保存的 HTML)
+  const [currentDesignId, setCurrentDesignId] = useState<string | null>(null);
   // iframe ref:让 Ribbon 等组件能直接访问 iframe.contentDocument 执行 execCommand
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -338,6 +348,33 @@ function App() {
     }
   }, [docHtml, shell, updateActiveDoc]);
 
+  // v2.1.0:applyDesign — 注入/清除设计 CSS 到 shell.head
+  // - id 为 null:移除所有 [data-weavepage-design] style
+  // - id 非 null:在 <style id="wp-toc-style"> 之后插入新 style
+  // shell 变化 → useMemo [activeDoc.id, shell] 重算 → iframe.srcDoc 重渲 → WYSIWYG 立即生效
+  const applyDesign = useCallback(
+    (id: string | null) => {
+      const design = getDesignById(id);
+      const css = design?.css ?? null;
+      const baseShell: DocShell = shell ?? {
+        doctype: "<!DOCTYPE html>",
+        head: "",
+        headCss: "",
+        bodyAttrs: "",
+        scripts: "",
+        styles: "",
+        baseHref: "",
+      };
+      const newHead = applyDesignToShellHead(baseShell.head, id, css);
+      const newShell = { ...baseShell, head: newHead };
+      setShell(newShell);
+      setCurrentDesignId(id);
+      setIsModified(true);
+      updateActiveDoc({ shell: newShell });
+    },
+    [shell, updateActiveDoc]
+  );
+
   // v0.1.13 第二十六轮:TOC 由 TocFloating.tsx(React Portal)渲染,
   // 内部监听 editor.on("update") 自动重算 heading id + 写入 PM state。
   // 这里不再需要 regen scheduling / tocEnabled state / onToggleToc。
@@ -399,6 +436,8 @@ function App() {
         } else {
           setShell(doc.shell ?? null);
         }
+        // v2.1.0:解析当前设计 id,用于面板高亮
+        setCurrentDesignId(parseDesignId(doc.shell?.head ?? ""));
         // editor 仍 setContent(保留给将来 stage 5 切换,但不影响 docHtml)
         editor?.commands.setContent(doc.body || "<p></p>");
         setMode(doc.mode);
@@ -1293,6 +1332,12 @@ const handleSpacingChange = useCallback(
   // v0.2.0:basePreview / previewDoc 已移除(预览视图不存在,编辑器 = 浏览器)
   const isTextDoc = activeDoc.kind === "text";
   const shownWordCount = isTextDoc ? activeDoc.body.length : wordCount;
+
+  // v2.1.0:Task 6 scaffolding — Task 7 wires these into <Ribbon> props
+  // void references keep tsc noUnusedLocals quiet until then
+  void DESIGNS;
+  void currentDesignId;
+  void applyDesign;
 
   return (
     <div className="editor-container">
