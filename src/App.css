@@ -1363,3 +1363,61 @@ body {
   gap: 8px;
   justify-items: center;
 }
+
+/* === v2.2.0 设计顶级 Ribbon Tab === */
+.ribbon-design-strip-wrap {
+  flex: 1;
+  overflow: hidden;
+  padding: 4px 8px;
+  background: var(--ribbon-bg, #f8f9fa);
+}
+
+.ribbon-design-strip {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+  scrollbar-width: thin;
+}
+
+.ribbon-design-strip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.ribbon-design-strip::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, #cbd5e0);
+  border-radius: 3px;
+}
+
+.ribbon-thumb-mini {
+  flex: 0 0 auto;
+  width: 90px;
+  padding: 3px;
+}
+
+.ribbon-thumb-mini .design-thumb-frame {
+  width: 84px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.ribbon-thumb-mini .design-thumb-iframe {
+  width: 84px;
+  height: 48px;
+  border: none;
+  pointer-events: none;
+}
+
+.ribbon-thumb-mini .design-thumb-name {
+  font-size: 10px;
+  margin-top: 2px;
+  text-align: center;
+}
+
+.ribbon-thumb-mini.is-selected {
+  outline: 2px solid #1f3a68;
+  outline-offset: 1px;
+}
