@@ -77,7 +77,7 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ## 🚀 安装
 
-1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_0.1.3_x64-setup.exe`
+1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_2.2.0_x64-setup.exe`
 2. 双击安装（自动安装 WebView2 运行时，全程无需联网）
 3. 从开始菜单启动 **WeavePage**
 
@@ -87,13 +87,13 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ```
 # NSIS 安装包 (~209 MB)
-sha256: b18976fc5ed781a3ca20bd9d561893d175a2f676303157f359cb2d08795ce13d
+sha256: e5a72387da478b3264256ada7f80da09a13431ae0d495c8b0d829be33af28fa8
 
-# MSI 安装包 (~208 MB)
-sha256: 51006b5f03b68e8f7cf311153c0b030069b2c18fa1a953fc927cf7f18d37c172
+# NSIS 应用内升级包 (~5.4 MB,仅供 WeavePage 应用内升级使用)
+sha256: 2c3d3983526d9f60bbdf6155f032969ad646764596756ecbcccae189e37b1331
 ```
 
-Windows 验证：`certutil -hashfile WeavePage_0.1.3_x64-setup.exe SHA256`
+Windows 验证：`certutil -hashfile WeavePage_2.2.0_x64-setup.exe SHA256`
 
 ## 📖 使用指南
 
@@ -152,6 +152,19 @@ pnpm release        # 打包安装程序到 release/ 目录
 - 演示文档见 [`assets/demo/demo.html`](assets/demo/demo.html)，下载后可直接用 WeavePage 打开体验
 
 ## 📋 变更日志
+
+### v2.2.0 — 2026-08-27
+- **新增 设计顶级 Ribbon Tab**:把 v2.1.0 设计按钮从 ribbon「编辑」tab 内的 dropdown 浮层提升为顶级 tab(与「编辑」「插入」平级)。菜单栏顺序:文件 / 编辑 / 插入 / 设计 / 视图 / 帮助
+- **重构 缩略图横排条**:9 张缩略图(默认 + 8 套预设)改为 ribbon 区域内的横向 scrollable 一条,90×60px,不再 dropdown 浮层。删除 portal/anchor 浮层逻辑,净 -50 行
+- **拆分 DesignThumb / DesignStrip**:DesignThumb 从 RibbonDesign.tsx 拆出为独立可复用组件;DesignStrip 作为横向 scrollable 容器;RibbonDesign.tsx 整体删除(200 行 portal+anchor 浮层全部作废)
+- **改进 source 视图禁用**:`设计` tab 在源码模式下 disabled + tooltip「请切换到编辑视图」(沿用 v2.1.0 行为,位置从 ribbon 内提升到顶级 tab)
+- **沿用 v2.1.0 设计功能**:8 套预设 CSS / 持久化(`<style data-weavepage-design>`)/ WYSIWYG / 目录样式跟随主风格 全部不动
+
+### v2.1.0 — 2026-08-26
+- **新增 文档设计子菜单**:Ribbon「设计」按钮组,弹出 16:9 缩略图面板(8 套预设 + 默认)。8 套风格:**经典学术 / 现代简约 / 文艺书卷 / 科技感 / 商务正式 / 柔雅 / 薄荷清新 / 复古印刷**;每张缩略图用 iframe srcdoc 隔离 CSS,真实显示各自设计效果
+- **新增 设计样式持久化**:选中的 design CSS 注入 `<style data-weavepage-design="X">` 到 `<head>`,写入 HTML 文件本身;保存重开自动恢复;目录样式跟随主风格
+- **修复 applyDesign 失效**:`sh.head` 是 `<head>` 的 innerHTML,旧 `replace("</head>", ...)` 永远找不到,改为追加到 head 末尾
+- **修复 9 张缩略图 CSS 冲突**:原 unscoped `<style>` 9 张共存时 last-wins,全部一样;改用 iframe srcdoc 各自隔离
 
 ### v0.1.2 — 2026-08-16
 - 新增 文件菜单「打开最近 ▶」二级子菜单，默认保存最近 10 个工作文档，附「清除」按钮

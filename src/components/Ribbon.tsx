@@ -1,52 +1,49 @@
-import type { Editor } from "@tiptap/react";
-import { RibbonButton } from "./controls";
+// v0.2.0:Ribbon 接收 iframeRef,无 preview 入口(编辑器视图 = WYSIWYG = 浏览器视图,无需预览)
+// - 字体/段落/样式/链接由 RibbonHome 用 iframe.contentDocument.execCommand 实现
+// - 表格/插图/水平线/目录由 RibbonInsert 用 iframe DOM + execCommand 实现
+// v2.2.0:增加 activeTab === "design" 分支,渲染 DesignStrip(9 张缩略图横排)
+
+import type { RefObject } from "react";
 import { RibbonHome } from "./RibbonHome";
 import { RibbonInsert } from "./RibbonInsert";
+import { DesignStrip } from "./DesignStrip";
 import type { RibbonTab } from "./MenuBar";
 
 export type ViewMode = "page" | "wide";
 export type ThemeMode = "system" | "light" | "dark";
 
 interface RibbonProps {
-  editor: Editor;
+  iframeRef: RefObject<HTMLIFrameElement | null>;
   disabled: boolean; // 源码视图时禁用
   activeTab: RibbonTab;
   collapsed: boolean;
-  previewActive: boolean;
-  onPreview: () => void;
   onInsertImage: () => void;
-  onInsertTable: (rows: number, cols: number) => void;
-  onDeleteTable: () => void;
   onLink: () => void;
   // 最近颜色(RibbonHome 用),App 层记录用色
   recentTextColors: string[];
   recentHighlightColors: string[];
   onColorUsed: (kind: "text" | "highlight", color: string) => void;
-  // RibbonHome 段落组行距 / 段前后 回调(由 App.tsx 实现,直接改 Tiptap 节点的 inline style)
+  // RibbonHome 段落组行距 / 段前后 回调(由 App.tsx 实现)
   onSpacingChange: (spacing: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => void;
   // RibbonHome 页面背景色回调(由 App.tsx 写到 shell.headCss)
   onPageBgChange: (hex: string) => void;
-  // v0.1.13 第二十七轮:inline doc-toc toggle 按钮状态
   tocEnabled: boolean;
   onToggleToc: () => void;
-  tocDisabled: boolean; // text doc / source 模式禁用
+  tocDisabled: boolean;
+  // v2.2.0:设计顶级 tab(从 RibbonHome 移过来)
+  currentDesignId: string | null;
+  onApplyDesign: (id: string | null) => void;
+  designDisabled: boolean;
 }
 
 export function Ribbon(props: RibbonProps) {
   return (
     <div className="ribbon">
       <div className={`ribbon-body ${props.collapsed ? "collapsed" : ""}`}>
-        <RibbonButton
-          icon="👁"
-          label="网页预览"
-          onClick={props.onPreview}
-          active={props.previewActive}
-          title={props.previewActive ? "退出网页预览" : "打开网页预览 (F5)"}
-        />
         <div className={`ribbon-tab-content ${props.disabled ? "disabled" : ""}`}>
-          {props.activeTab === "edit" ? (
+          {props.activeTab === "edit" && (
             <RibbonHome
-              editor={props.editor}
+              iframeRef={props.iframeRef}
               onLink={props.onLink}
               recentTextColors={props.recentTextColors}
               recentHighlightColors={props.recentHighlightColors}
@@ -54,15 +51,21 @@ export function Ribbon(props: RibbonProps) {
               onSpacingChange={props.onSpacingChange}
               onPageBgChange={props.onPageBgChange}
             />
-          ) : (
+          )}
+          {props.activeTab === "insert" && (
             <RibbonInsert
-              editor={props.editor}
+              iframeRef={props.iframeRef}
               onInsertImage={props.onInsertImage}
-              onInsertTable={props.onInsertTable}
-              onDeleteTable={props.onDeleteTable}
               tocEnabled={props.tocEnabled}
               onToggleToc={props.onToggleToc}
               tocDisabled={props.tocDisabled}
+            />
+          )}
+          {props.activeTab === "design" && (
+            <DesignStrip
+              currentDesignId={props.currentDesignId}
+              onApply={props.onApplyDesign}
+              disabled={props.designDisabled}
             />
           )}
         </div>

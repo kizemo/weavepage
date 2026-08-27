@@ -5,7 +5,7 @@ export interface DocState {
   isModified: boolean;
   body: string; // html: 编辑器 body 内容;text: 文件全文
   sourceText: string; // html 源码模式编辑文本
-  mode: "edit" | "source" | "preview";
+  mode: "edit" | "source";
   shell: {
     doctype: string;
     head: string;

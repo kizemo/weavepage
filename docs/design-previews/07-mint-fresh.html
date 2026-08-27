@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>薄荷清新 — WeavePage 设计预览</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=JetBrains+Mono:wght@400&family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<style data-weavepage-design="mint-fresh">
+/* === 薄荷清新 · Mint Fresh === */
+/* 薄荷绿底 + 无衬线 + 清新自然 */
+body {
+  background: #eaf6ef;
+  color: #1f3d2c;
+  font-family: 'Nunito', 'Noto Sans SC', -apple-system, sans-serif;
+  line-height: 1.75;
+  font-size: 16px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 60px 40px;
+}
+h1 {
+  font-size: 2.2em;
+  font-weight: 700;
+  color: #2c8a6b;
+  margin: 1em 0 .5em;
+}
+h2 {
+  font-size: 1.6em;
+  font-weight: 700;
+  color: #2c8a6b;
+  position: relative;
+  padding-left: 1em;
+  margin: 1.4em 0 .5em;
+}
+h2::before {
+  content: '🌿';
+  position: absolute;
+  left: 0;
+  font-size: .8em;
+  top: .15em;
+}
+h3 {
+  font-size: 1.3em;
+  font-weight: 600;
+  color: #3aa17e;
+  margin: 1.2em 0 .4em;
+}
+h4, h5, h6 {
+  font-weight: 600;
+  color: #3aa17e;
+  margin: 1em 0 .4em;
+}
+p { margin: 1em 0; }
+a {
+  color: #2c8a6b;
+  text-decoration: none;
+  border-bottom: 2px dotted #3aa17e;
+}
+blockquote {
+  border-left: 4px solid #3aa17e;
+  padding: .5em 1.2em;
+  background: rgba(58, 161, 126, .08);
+  color: #1f3d2c;
+  border-radius: 0 8px 8px 0;
+  margin: 1.2em 0;
+}
+code {
+  font-family: 'JetBrains Mono', monospace;
+  background: #d8efe2;
+  padding: .15em .35em;
+  border-radius: 4px;
+  font-size: .88em;
+  color: #2c8a6b;
+}
+pre {
+  font-family: 'JetBrains Mono', monospace;
+  background: #fff;
+  border: 1px solid #b8e0c9;
+  padding: 1em;
+  border-radius: 8px;
+  font-size: .88em;
+  margin: 1em 0;
+  overflow-x: auto;
+}
+kbd {
+  font-family: monospace;
+  background: #fff;
+  border: 1px solid #b8e0c9;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: .1em .4em;
+  font-size: .85em;
+  color: #1f3d2c;
+}
+img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+figure {
+  text-align: center;
+  margin: 1.8em 0;
+}
+figcaption {
+  font-size: .85em;
+  color: #3aa17e;
+  margin-top: .5em;
+}
+.fig-placeholder {
+  background: linear-gradient(135deg, #d8efe2 0%, #b8e0c9 100%);
+  width: 100%;
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1f3d2c;
+  border-radius: 12px;
+}
+table {
+  border-collapse: collapse;
+  border: 1px solid #b8e0c9;
+  width: 100%;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 1em 0;
+}
+th, td {
+  border: 1px solid #d8efe2;
+  padding: .6em;
+}
+thead {
+  background: #d8efe2;
+  color: #1f3d2c;
+  font-weight: 700;
+}
+tr:nth-child(even) { background: #f4fbf7; }
+hr {
+  border: none;
+  border-top: 1px solid #b8e0c9;
+  margin: 2em 0;
+}
+ul, ol { padding-left: 1.5em; }
+li { margin: .4em 0; }
+
+/* === 目录样式覆写 === */
+.wp-toc-floating-wrap {
+  background: #fff;
+  border: 1px solid #b8e0c9;
+  font-family: inherit;
+  border-radius: 12px;
+}
+.wp-toc-h2-link { color: #2c8a6b; }
+.wp-toc-h2-item:hover > .wp-toc-h2-link { background: #d8efe2; }
+.wp-toc-h3-submenu {
+  background: #fff;
+  border: 1px solid #b8e0c9;
+  border-radius: 8px;
+}
+</style>
+</head>
+<body>
+<div style="background:#d8efe2;border:1px solid #b8e0c9;border-radius:12px;padding:8px 14px;margin-bottom:32px;display:inline-block;font-size:13px;color:#2c8a6b;font-family:sans-serif;">
+  WeavePage 设计预览 · 薄荷清新 · Mint Fresh
+</div>
+
+<h1>一级标题示例 · Sample H1</h1>
+<h2>二级标题示例</h2>
+<h3>三级标题示例 · Sample H3</h3>
+
+<p>正文段落示例,展示<strong>粗体</strong>与<em>斜体</em>与<a href="#">链接</a>。英文 Mixed content 用于测试字体降级与混排。段落间距与行高直接决定阅读体验。</p>
+
+<blockquote>「引用块示例,展示左侧边线、背景与字体节奏。」<br>— Author Name</blockquote>
+
+<p>使用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 复制以下代码:</p>
+
+<pre><code>const style = 'applied';
+function applyDesign(id) {
+  console.log('design:', id);
+}</code></pre>
+
+<figure>
+  <div class="fig-placeholder">🌱 图片占位 · Image Placeholder 16:9</div>
+  <figcaption>图注示例 · Figure caption</figcaption>
+</figure>
+
+<table>
+  <thead>
+    <tr><th>表头 1</th><th>表头 2</th><th>表头 3</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>单元格 1</td><td>单元格 2</td><td>单元格 3</td></tr>
+    <tr><td>单元格 4</td><td>单元格 5</td><td>单元格 6</td></tr>
+    <tr><td>单元格 7</td><td>单元格 8</td><td>单元格 9</td></tr>
+  </tbody>
+</table>
+
+<ul>
+  <li>列表项 1 — unordered list example</li>
+  <li>列表项 2 — 强调项</li>
+  <li>列表项 3</li>
+</ul>
+
+<hr>
+
+<p style="color:#3aa17e;font-size:.9em;text-align:center;margin-top:2em;">— 薄荷清新 · Mint Fresh · 预览结束 —</p>
+</body>
+</html>

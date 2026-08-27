@@ -1,99 +1,97 @@
-import { useState, useEffect } from "react";
-import type { Editor } from "@tiptap/react";
-import { DOMSerializer, Fragment } from "@tiptap/pm/model";
+// v0.1.13 第三十轮:iframe-based BlockSourcePanel
+// - 接收 element(来自 iframe.contentDocument)替代 editor + initialPos
+// - 显示 element.outerHTML,可编辑
+// - 应用:parse 编辑后 HTML,替换 element 在 DOM 树中的位置
+// - onApplied:App.tsx 触发 iframe input 事件同步 docHtml
+
+import { useEffect, useState } from "react";
 
 interface BlockSourcePanelProps {
-  editor: Editor;
-  initialPos: number;
+  element: HTMLElement;
   onClose: () => void;
+  onApplied: () => void;
 }
 
-// 序列化单个块节点为 HTML
-const serializeBlock = (editor: Editor, pos: number): string => {
-  const node = editor.state.doc.nodeAt(pos);
-  if (!node) return "";
-  const ser = DOMSerializer.fromSchema(editor.schema);
-  const el = document.createElement("div");
-  el.appendChild(ser.serializeFragment(Fragment.from(node)));
-  return el.innerHTML;
+const isBlockElement = (el: HTMLElement): boolean => {
+  const display = window.getComputedStyle(el).display;
+  return !display.startsWith("inline");
 };
 
-const blockTypeName = (editor: Editor, pos: number): string => {
-  const node = editor.state.doc.nodeAt(pos);
-  return node ? node.type.name : "";
+const getParentBlock = (el: HTMLElement): HTMLElement | null => {
+  let n: HTMLElement | null = el.parentElement;
+  while (n) {
+    if (isBlockElement(n)) return n;
+    n = n.parentElement;
+  }
+  return null;
 };
 
-export function BlockSourcePanel({ editor, initialPos, onClose }: BlockSourcePanelProps) {
-  const [pos, setPos] = useState(initialPos);
-  const [text, setText] = useState(() => serializeBlock(editor, initialPos));
+const getFirstChildBlock = (el: HTMLElement): HTMLElement | null => {
+  // 找直接子级中第一个 block 元素
+  for (const child of Array.from(el.children)) {
+    if (child instanceof HTMLElement && isBlockElement(child)) return child;
+  }
+  return null;
+};
 
-  // 导航改变 pos 后重新序列化
+const getSiblingBlock = (el: HTMLElement, dir: -1 | 1): HTMLElement | null => {
+  const sibling = dir === -1 ? el.previousElementSibling : el.nextElementSibling;
+  if (sibling instanceof HTMLElement && isBlockElement(sibling)) return sibling;
+  return null;
+};
+
+const serializeElement = (el: HTMLElement): string => {
+  return el.outerHTML;
+};
+
+export function BlockSourcePanel({ element: initialElement, onClose, onApplied }: BlockSourcePanelProps) {
+  const [current, setCurrent] = useState<HTMLElement>(initialElement);
+  const [text, setText] = useState<string>(() => serializeElement(initialElement));
+
+  // 当 current 改变(用户导航),重新序列化
   useEffect(() => {
-    setText(serializeBlock(editor, pos));
-  }, [editor, pos]);
+    setText(serializeElement(current));
+  }, [current]);
 
-  const doc = editor.state.doc;
-
-  const parentBlock = (p: number): number | null => {
-    const $p = doc.resolve(p);
-    const d = $p.depth;
-    if (d <= 1) return null; // 父节点是 doc
-    return $p.before(d - 1);
-  };
-
-  const firstChildBlock = (p: number): number | null => {
-    const node = doc.nodeAt(p);
-    if (!node) return null;
-    let found: number | null = null;
-    node.forEach((child, offset) => {
-      if (found == null && child.isBlock) found = p + 1 + offset;
-    });
-    return found;
-  };
-
-  const siblingBlock = (p: number, dir: -1 | 1): number | null => {
-    const $p = doc.resolve(p);
-    const d = $p.depth;
-    if (d <= 1) return null;
-    const parent = $p.node(d - 1);
-    const idx = $p.index(d - 1);
-    const t = idx + dir;
-    if (t < 0 || t >= parent.childCount) return null;
-    let start = $p.before(d - 1) + 1;
-    for (let i = 0; i < t; i++) start += parent.child(i).nodeSize;
-    return start;
-  };
-
-  const nav = (next: number | null) => {
-    if (next != null) setPos(next);
+  const nav = (next: HTMLElement | null) => {
+    if (next) setCurrent(next);
   };
 
   const apply = () => {
-    const node = doc.nodeAt(pos);
-    if (!node) return;
-    const from = pos;
-    const to = pos + node.nodeSize;
-    editor.chain().focus().deleteRange({ from, to }).run();
-    editor.chain().focus().insertContentAt(from, text).run();
+    const doc = current.ownerDocument;
+    if (!doc) return;
+    // 解析编辑后的 HTML
+    const tmpl = doc.createElement("template");
+    tmpl.innerHTML = text;
+    const newEl = tmpl.content.firstElementChild;
+    if (!(newEl instanceof HTMLElement)) {
+      window.alert("无法解析 HTML,请检查语法");
+      return;
+    }
+    if (current.parentNode) {
+      current.parentNode.replaceChild(newEl, current);
+      setCurrent(newEl);
+      onApplied();
+    }
   };
 
   return (
     <div className="block-panel">
       <div className="block-panel-head">
-        <span>块源代码 · {blockTypeName(editor, pos)}</span>
+        <span>块源代码 · {current.tagName.toLowerCase()}</span>
         <button onClick={onClose} title="关闭">×</button>
       </div>
       <div className="block-panel-nav">
-        <button onClick={() => nav(parentBlock(pos))} title="选择父块">
+        <button onClick={() => nav(getParentBlock(current))} title="选择父块">
           ⬆ 父块
         </button>
-        <button onClick={() => nav(firstChildBlock(pos))} title="选择第一个子块">
+        <button onClick={() => nav(getFirstChildBlock(current))} title="选择第一个子块">
           ⬇ 子块
         </button>
-        <button onClick={() => nav(siblingBlock(pos, -1))} title="上一个兄弟块">
+        <button onClick={() => nav(getSiblingBlock(current, -1))} title="上一个兄弟块">
           ←
         </button>
-        <button onClick={() => nav(siblingBlock(pos, 1))} title="下一个兄弟块">
+        <button onClick={() => nav(getSiblingBlock(current, 1))} title="下一个兄弟块">
           →
         </button>
       </div>

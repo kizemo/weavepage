@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>WeavePage 设计子菜单 — 风格预览索引</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    font-family: 'Inter', 'Noto Sans SC', -apple-system, sans-serif;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 60px 32px;
+    background: #fafafa;
+    color: #1f2328;
+    line-height: 1.6;
+  }
+  h1 {
+    font-size: 2em;
+    font-weight: 800;
+    margin: 0 0 8px;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    color: #6b7280;
+    margin: 0 0 8px;
+    font-size: 14px;
+  }
+  .meta {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 24px 0 40px;
+    font-size: 14px;
+    color: #4b5563;
+  }
+  .meta strong { color: #1f2328; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 20px;
+    text-decoration: none;
+    color: #1f2328;
+    transition: all .15s ease;
+    display: block;
+  }
+  .card:hover {
+    border-color: #1f2328;
+    box-shadow: 0 4px 12px rgba(0,0,0,.06);
+    transform: translateY(-2px);
+  }
+  .num {
+    display: inline-block;
+    background: #1f2328;
+    color: #fff;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 24px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .name-cn {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0 0 4px;
+  }
+  .name-en {
+    font-size: 13px;
+    color: #6b7280;
+    margin: 0 0 10px;
+  }
+  .desc {
+    font-size: 14px;
+    color: #4b5563;
+    line-height: 1.5;
+  }
+  .palette {
+    display: flex;
+    gap: 4px;
+    margin-top: 12px;
+  }
+  .palette span {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border: 1px solid rgba(0,0,0,.08);
+  }
+  .footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid #e5e7eb;
+    font-size: 13px;
+    color: #6b7280;
+  }
+</style>
+</head>
+<body>
+
+<h1>WeavePage 设计子菜单 · 风格预览</h1>
+<p class="subtitle">Document Designs for WeavePage v2.1.0 — 8 个风格 + 1 个默认按钮</p>
+
+<div class="meta">
+  <strong>使用说明</strong>:点击下方任一卡片,在浏览器中打开对应的预览 HTML,即可看到该风格在真实样例文档(标题/正文/引用/代码/表格/列表等)上的渲染效果。
+  每个预览页都嵌入了该设计的 <strong>完整 CSS</strong>(与 spec §6 一致),用户可浏览器全屏查看或截图作为设计参考。
+  <br><br>
+  <strong>Spec</strong>:<code>docs/superpowers/specs/2026-08-26-design-styles-design.md</code> · <strong>本目录</strong>:<code>docs/design-previews/</code>
+</div>
+
+<div class="grid">
+
+  <a class="card" href="01-classic-academic.html">
+    <div class="num">1</div>
+    <p class="name-cn">经典学术</p>
+    <p class="name-en">Classic Academic</p>
+    <p class="desc">白底 + 思源宋体 + 严谨排版。适合论文、文档、教材。</p>
+    <div class="palette">
+      <span style="background:#fff;border:1px solid #ccc"></span>
+      <span style="background:#1a1a1a"></span>
+      <span style="background:#f7f7f7"></span>
+    </div>
+  </a>
+
+  <a class="card" href="02-modern-minimalist.html">
+    <div class="num">2</div>
+    <p class="name-cn">现代简约</p>
+    <p class="name-en">Modern Minimalist</p>
+    <p class="desc">白底 + Inter 无衬线 + 大行距。Notion 风,适合产品文档、技术博客。</p>
+    <div class="palette">
+      <span style="background:#fff;border:1px solid #ccc"></span>
+      <span style="background:#1f2328"></span>
+      <span style="background:#2563eb"></span>
+    </div>
+  </a>
+
+  <a class="card" href="03-literary-scroll.html">
+    <div class="num">3</div>
+    <p class="name-cn">文艺书卷</p>
+    <p class="name-en">Literary Scroll</p>
+    <p class="desc">米黄/宣纸 + 衬线 + 温暖手感。得到/中信风,适合散文、随笔。</p>
+    <div class="palette">
+      <span style="background:#f5efe0"></span>
+      <span style="background:#5c3a1e"></span>
+      <span style="background:#b48a4a"></span>
+    </div>
+  </a>
+
+  <a class="card" href="04-tech-dark.html">
+    <div class="num">4</div>
+    <p class="name-cn">科技感</p>
+    <p class="name-en">Tech Dark</p>
+    <p class="desc">深蓝/黑底 + 等宽字体 + 霓虹点缀。GitHub Dark 风,适合技术文档。</p>
+    <div class="palette">
+      <span style="background:#0d1117"></span>
+      <span style="background:#58a6ff"></span>
+      <span style="background:#79c0ff"></span>
+    </div>
+  </a>
+
+  <a class="card" href="05-business-formal.html">
+    <div class="num">5</div>
+    <p class="name-cn">商务正式</p>
+    <p class="name-en">Business Formal</p>
+    <p class="desc">浅蓝灰底 + 深蓝标题 + 稳重大气。麦肯锡/领英风,适合企业宣传。</p>
+    <div class="palette">
+      <span style="background:#f4f6fa"></span>
+      <span style="background:#1f3a68"></span>
+      <span style="background:#cbd5e0"></span>
+    </div>
+  </a>
+
+  <a class="card" href="06-soft-elegant.html">
+    <div class="num">6</div>
+    <p class="name-cn">柔雅</p>
+    <p class="name-en">Soft Elegant</p>
+    <p class="desc">柔粉/裸色 + 衬线 + 圆角 + 轻奢感。适合生活方式、女性向内容。</p>
+    <div class="palette">
+      <span style="background:#faf3ee"></span>
+      <span style="background:#b06a5c"></span>
+      <span style="background:#d4a39a"></span>
+    </div>
+  </a>
+
+  <a class="card" href="07-mint-fresh.html">
+    <div class="num">7</div>
+    <p class="name-cn">薄荷清新</p>
+    <p class="name-en">Mint Fresh</p>
+    <p class="desc">薄荷绿底 + 无衬线 + 清新自然。适合个人博客、手账、生活方式。</p>
+    <div class="palette">
+      <span style="background:#eaf6ef"></span>
+      <span style="background:#2c8a6b"></span>
+      <span style="background:#b8e0c9"></span>
+    </div>
+  </a>
+
+  <a class="card" href="08-vintage-print.html">
+    <div class="num">8</div>
+    <p class="name-cn">复古印刷</p>
+    <p class="name-en">Vintage Print</p>
+    <p class="desc">牛皮纸底 + 衬线 + 做旧质感。适合怀旧、上世纪主题内容。</p>
+    <div class="palette">
+      <span style="background:#d9c9a8"></span>
+      <span style="background:#3a2f1d"></span>
+      <span style="background:#5c4a30"></span>
+    </div>
+  </a>
+
+</div>
+
+<div class="footer">
+  <strong>关于"默认"按钮</strong>:不渲染预览 HTML。当用户选择"默认"时,WeavePage 移除文档中所有
+  <code>&lt;style data-weavepage-design&gt;</code> 标签,文档回到浏览器默认渲染(Times New Roman + 默认行距)。
+  用户打开预览页看到的是浏览器默认效果,未注入任何设计样式。
+</div>
+
+</body>
+</html>

@@ -699,6 +699,35 @@ body {
   display: none !important;
 }
 
+/* ============ 编辑器视图(第三十轮 iframe-based) ============ */
+/* iframe-based 编辑器:浏览器原生 HTML 解析,真正 WYSIWYG。
+   关键:占满 .editor-scroll,无边框,白色背景,内部可滚动 */
+.editor-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--surface);
+}
+/* 页式视图:iframe 内 body 居中白纸 — 用 iframe padding 模拟页面 */
+.editor-page .editor-iframe {
+  /* 页式视图时让 iframe 跟 .editor-body 一样限宽 + 居中 + 白纸阴影 */
+  display: block;
+  margin: 24px auto;
+  width: calc(100% - 48px);
+  max-width: 794px;
+  min-height: calc(100vh - 200px);
+  box-shadow: var(--page-shadow);
+  border-radius: 2px;
+}
+/* 全宽视图:iframe 占满 */
+.editor-wide .editor-iframe {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  box-shadow: none;
+}
+
 /* ============ 编辑区正式 ============ */
 .editor-scroll {
   flex: 1;
@@ -1241,4 +1270,154 @@ body {
   padding: .5em .9em;
   color: var(--text-dim);
   font-size: 12px;
+}
+
+/* ============ 设计子菜单 ============ */
+/* 缩略图卡:16:9 比例,圆角,选中态高亮 */
+.design-thumb-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: all 0.12s ease;
+  width: 156px;
+}
+.design-thumb-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.design-thumb-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* 缩略图 frame:16:9 容器,overflow:hidden 避免迷你样例溢出 */
+.design-thumb-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+}
+/* iframe 缩略图:铺满 frame,自带 CSS 隔离避免 9 个 design 互相冲突 */
+.design-thumb-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  pointer-events: none; /* 缩略图只用于预览,不能误吞点击事件 */
+}
+.design-thumb-body {
+  /* 默认卡内联样例 HTML 的样式约束:缩小字体避免溢出 */
+  font-size: 6px;
+  line-height: 1.4;
+  padding: 8px 10px;
+  transform-origin: top left;
+}
+.design-thumb-body h1 { font-size: 10px; margin: 2px 0; }
+.design-thumb-body h2 { font-size: 9px; margin: 2px 0; }
+.design-thumb-body p { margin: 2px 0; }
+.design-thumb-body blockquote { margin: 2px 0; padding: 2px 6px; }
+.design-thumb-body pre { margin: 2px 0; padding: 3px 4px; font-size: 5px; }
+.design-thumb-body table { font-size: 5px; }
+.design-thumb-body td, .design-thumb-body th { padding: 1px 3px; }
+.design-thumb-body ul { padding-left: 12px; margin: 1px 0; }
+.design-thumb-body hr { margin: 2px 0; }
+.design-thumb-name {
+  font-size: 12px;
+  color: var(--text);
+  text-align: center;
+  padding: 2px 0;
+  user-select: none;
+}
+
+/* 面板容器 */
+.ribbon-design-picker {
+  width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  padding: 8px;
+  user-select: none;
+}
+.ribbon-design-picker-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 6px 8px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.ribbon-design-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  justify-items: center;
+}
+
+/* === v2.2.0 设计顶级 Ribbon Tab === */
+.ribbon-design-strip-wrap {
+  flex: 1;
+  overflow: hidden;
+  padding: 4px 8px;
+  background: var(--ribbon-bg, #f8f9fa);
+}
+
+.ribbon-design-strip {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+  scrollbar-width: thin;
+}
+
+.ribbon-design-strip::-webkit-scrollbar {
+  height: 6px;
+}
+
+.ribbon-design-strip::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, #cbd5e0);
+  border-radius: 3px;
+}
+
+.ribbon-thumb-mini {
+  flex: 0 0 auto;
+  width: 90px;
+  padding: 3px;
+}
+
+.ribbon-thumb-mini .design-thumb-frame {
+  width: 84px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.ribbon-thumb-mini .design-thumb-iframe {
+  width: 84px;
+  height: 48px;
+  border: none;
+  pointer-events: none;
+}
+
+.ribbon-thumb-mini .design-thumb-name {
+  font-size: 10px;
+  margin-top: 2px;
+  text-align: center;
+}
+
+.ribbon-thumb-mini.is-selected {
+  outline: 2px solid #1f3a68;
+  outline-offset: 1px;
 }

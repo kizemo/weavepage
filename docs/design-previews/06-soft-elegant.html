@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>柔雅 — WeavePage 设计预览</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<style data-weavepage-design="soft-elegant">
+/* === 柔雅 · Soft Elegant === */
+/* 柔粉/裸色 + 衬线 + 圆角 + 轻奢感 */
+body {
+  background: #faf3ee;
+  color: #5c3a2e;
+  font-family: 'Cormorant Garamond', 'Noto Serif SC', 'Songti SC', serif;
+  line-height: 1.85;
+  font-size: 16px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 60px 40px;
+}
+h1 {
+  font-size: 2.2em;
+  font-weight: 600;
+  color: #b06a5c;
+  text-align: center;
+  font-style: italic;
+  margin: 1em 0 .6em;
+}
+h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  color: #b06a5c;
+  border-radius: 10px;
+  padding: .4em 1em;
+  margin: 1.2em 0;
+  background: rgba(176, 106, 92, .08);
+  border: 1px solid rgba(176, 106, 92, .2);
+  display: inline-block;
+}
+h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  color: #c08577;
+  font-style: italic;
+  margin: 1.2em 0 .4em;
+}
+h4, h5, h6 {
+  font-weight: 600;
+  color: #c08577;
+  margin: 1em 0 .4em;
+}
+p { margin: 1em 0; }
+a {
+  color: #b06a5c;
+  text-decoration: none;
+  border-bottom: 1px solid #d4a39a;
+}
+blockquote {
+  border-left: 3px solid #d4a39a;
+  padding: .6em 1.2em;
+  background: rgba(212, 163, 154, .12);
+  color: #5c3a2e;
+  border-radius: 0 12px 12px 0;
+  font-style: italic;
+  margin: 1.2em 0;
+}
+code {
+  font-family: monospace;
+  background: #f3e8e2;
+  padding: .15em .35em;
+  border-radius: 6px;
+  font-size: .88em;
+  color: #b06a5c;
+}
+pre {
+  font-family: monospace;
+  background: #fff;
+  border: 1px solid #e8d4cb;
+  padding: 1em;
+  border-radius: 12px;
+  font-size: .88em;
+  color: #5c3a2e;
+  margin: 1em 0;
+  overflow-x: auto;
+}
+kbd {
+  font-family: monospace;
+  background: #fff;
+  border: 1px solid #d4a39a;
+  border-radius: 6px;
+  padding: .1em .4em;
+  font-size: .85em;
+  color: #5c3a2e;
+}
+img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 16px;
+}
+figure {
+  text-align: center;
+  margin: 1.8em 0;
+}
+figcaption {
+  font-size: .85em;
+  color: #b06a5c;
+  font-style: italic;
+  margin-top: .5em;
+}
+.fig-placeholder {
+  background: linear-gradient(135deg, #f3e8e2 0%, #e8d4cb 100%);
+  width: 100%;
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b06a5c;
+  border-radius: 16px;
+  font-style: italic;
+}
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: none;
+  width: 100%;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(176, 106, 92, .1);
+  overflow: hidden;
+  margin: 1em 0;
+}
+th, td {
+  padding: .8em 1em;
+  text-align: left;
+}
+thead {
+  background: #f3e8e2;
+  color: #b06a5c;
+  font-weight: 700;
+}
+tr:nth-child(even) { background: #faf3ee; }
+hr {
+  border: none;
+  border-top: 1px solid #e8d4cb;
+  margin: 2em 0;
+}
+ul, ol { padding-left: 1.5em; }
+li { margin: .4em 0; }
+
+/* === 目录样式覆写 === */
+.wp-toc-floating-wrap {
+  background: #fff;
+  border: 1px solid #e8d4cb;
+  font-family: inherit;
+  border-radius: 16px;
+}
+.wp-toc-h2-link { color: #b06a5c; }
+.wp-toc-h2-item:hover > .wp-toc-h2-link { background: #f3e8e2; }
+.wp-toc-h3-submenu {
+  background: #fff;
+  border: 1px solid #e8d4cb;
+  border-radius: 12px;
+}
+</style>
+</head>
+<body>
+<div style="background:#f3e8e2;border:1px solid #e8d4cb;border-radius:16px;padding:8px 14px;margin-bottom:32px;display:inline-block;font-size:13px;color:#b06a5c;font-family:sans-serif;">
+  WeavePage 设计预览 · 柔雅 · Soft Elegant
+</div>
+
+<h1>一级标题示例 · Sample H1</h1>
+<h2>二级标题示例</h2>
+<h3>三级标题示例 · Sample H3</h3>
+
+<p>正文段落示例,展示<strong>粗体</strong>与<em>斜体</em>与<a href="#">链接</a>。英文 Mixed content 用于测试字体降级与混排。段落间距与行高直接决定阅读体验。</p>
+
+<blockquote>「引用块示例,展示左侧边线、背景与字体节奏。」<br>— Author Name</blockquote>
+
+<p>使用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 复制以下代码:</p>
+
+<pre><code>const style = 'applied';
+function applyDesign(id) {
+  console.log('design:', id);
+}</code></pre>
+
+<figure>
+  <div class="fig-placeholder">🌸 图片占位 · Image Placeholder 16:9</div>
+  <figcaption>图注示例 · Figure caption</figcaption>
+</figure>
+
+<table>
+  <thead>
+    <tr><th>表头 1</th><th>表头 2</th><th>表头 3</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>单元格 1</td><td>单元格 2</td><td>单元格 3</td></tr>
+    <tr><td>单元格 4</td><td>单元格 5</td><td>单元格 6</td></tr>
+    <tr><td>单元格 7</td><td>单元格 8</td><td>单元格 9</td></tr>
+  </tbody>
+</table>
+
+<ul>
+  <li>列表项 1 — unordered list example</li>
+  <li>列表项 2 — 强调项</li>
+  <li>列表项 3</li>
+</ul>
+
+<hr>
+
+<p style="color:#b06a5c;font-size:.9em;text-align:center;margin-top:2em;font-style:italic;">— 柔雅 · Soft Elegant · 预览结束 —</p>
+</body>
+</html>

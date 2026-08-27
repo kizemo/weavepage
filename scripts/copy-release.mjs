@@ -1,11 +1,16 @@
 // 构建后把安装包复制到项目根 release 目录
 //
 // channel 参数(argv[2],默认 "full"):
-//   full   — 默认。复制 NSIS setup.exe + MSI(完整渠道,嵌 WebView2 离线包)
+//   full   — 默认。复制 NSIS setup.exe(完整渠道,嵌 WebView2 离线包)
 //   update — 只复制 NSIS setup.exe 并改名为 _update.exe(轻量渠道,升级用)
 //
-//   tauri build 跑两次,第二次传 --config tauri.conf.update.json 覆盖 webviewInstallMode;
-//   Tauri v2 --config 是 partial merge,所以主 config 的 version/identifier 不动。
+// tauri build 跑两次,第二次传 --config tauri.conf.update.json 覆盖 webviewInstallMode;
+// Tauri v2 --config 是 partial merge,所以主 config 的 version/identifier 不动。
+//
+// ⚠️ v2.0.2 起:不再生成 MSI 安装包(用户决定 2026-08-25)。
+//   - tauri.conf.json `bundle.targets` 改为 "nsis",只生成 NSIS
+//   - copy-release.mjs 跳过 MSI 复制
+//   - release/ 不再有 *.msi 文件
 //
 // 用法:
 //   node scripts/copy-release.mjs full    # 默认
@@ -31,7 +36,6 @@ const productName = conf.productName ?? "WeavePage";
 const version = conf.version;
 
 const nsisSrc = path.join(bundle, "nsis", `${productName}_${version}_x64-setup.exe`);
-const msiSrc = path.join(bundle, "msi", `${productName}_${version}_x64_en-US.msi`);
 
 await mkdir(dest, { recursive: true });
 
@@ -46,15 +50,7 @@ if (channel === "full") {
     console.error("未找到 NSIS 安装包:", nsisSrc);
     failed = true;
   }
-
-  if (existsSync(msiSrc)) {
-    const dst = path.join(dest, `${productName}_${version}_x64_en-US.msi`);
-    await cp(msiSrc, dst);
-    console.log(`已复制 MSI (full)    -> ${dst}`);
-  } else {
-    console.error("未找到 MSI 安装包:", msiSrc);
-    failed = true;
-  }
+  // v2.0.2:MSI 不再生成
 } else if (channel === "update") {
   // update 渠道:NSIS 不再嵌 WebView2 离线包,体量从 ~209MB 降到 ~25MB
   // 复制一份 setup.exe 然后改名为 _update.exe(NSIS 升级链正常)
@@ -69,7 +65,6 @@ if (channel === "full") {
     console.error("未找到 NSIS 安装包:", nsisSrc);
     failed = true;
   }
-  // update 渠道不发 MSI(轻量化优先,MSI 在国内极少用)
 }
 
 if (failed) process.exitCode = 1;

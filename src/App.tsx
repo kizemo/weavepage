@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { TextStyle } from "@tiptap/extension-text-style";
 import Color from "@tiptap/extension-color";
@@ -31,15 +31,19 @@ import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
 import { AboutDialog } from "./components/AboutDialog";
 import { EditorContextMenu } from "./components/EditorContextMenu";
-// v0.1.13 第二十九轮:TOC UI 双轨方案
-// 1. 编辑器视图:React Portal TocFloating 挂到 document.body(避开 .editor-body contenteditable)
-// 2. 预览 iframe:doc-toc atom 自身的 inline style(独立 document,fixed lock iframe viewport)
-// 3. 浏览器 export:doc-toc atom inline style
-// 视觉一致(都看 wrap fixed 右上角 + panel + 子菜单)
-import { TocFloating } from "./components/TocFloating";
+// v0.1.13 第三十轮:TOC 改为在 iframe 内部渲染(由 shell.head 的 TOC_CSS + doc-toc atom 的 TOC_SCRIPT 驱动)
+// 编辑器视图 / 预览视图 / 浏览器打开 三者完全 WYSIWYG 一致
+// 旧 React Portal TocFloating.tsx 已不再使用
 // toggle 通过 Ribbon「插入/删除目录」按钮
-import { toggleToc, hasTocInDoc, refreshTocHtml } from "./utils/tocGen";
-import { formatHtml } from "./utils/formatHtml";
+import {
+  hasDocTocInHtml,
+  toggleDocTocInHtml,
+  scanHeadingsFromHtml,
+  assignHeadingIdsInHtml,
+  buildTocStyleTag,
+  removeTocStyleTag,
+} from "./utils/tocGen";
+import { formatHtml, escAttr } from "./utils/formatHtml";
 import { loadRecent, pushRecent, clearRecent } from "./utils/recentFiles";
 import { loadRecentColors, pushRecentColor } from "./utils/recentColors";
 import type { ColorKind, RecentColorsResult } from "./utils/recentColors";
@@ -58,6 +62,12 @@ import {
   blockTypeToSelector,
 } from "./utils/defaultStyle";
 import { applyBodyBackground } from "./utils/headShell";
+// v2.1.0:文档设计 — 8 套预设样式 + 默认(纯内存,不持久化)
+import {
+  getDesignById,
+  applyDesignToShellHead,
+  parseDesignId,
+} from "./utils/designs";
 // v0.1.13 第十五轮:TOC_STYLES / TOC_FLOATING_SCRIPT 已不再使用 — inline docToc atom 自包含 <style> + <script>
 import "./App.css";
 
@@ -88,17 +98,12 @@ const scopedCss = (css: string): string =>
     )
     .replace(/position:\s*fixed/gi, "position: absolute");
 
-// 把编辑内容注入原始 HTML 的 body 区域（保留 head/style/script，刷新预览时用）
-const injectBody = (raw: string, bodyHtml: string): string =>
-  raw.replace(/(<body[^>]*>)[\s\S]*?(<\/body>)/i, `$1${bodyHtml}$2`);
+// v0.2.0:injectBody 已不再使用(preview 视图移除)— 保留供将来 use case
+// const injectBody = (raw: string, bodyHtml: string): string =>
+//   raw.replace(/(<body[^>]*>)[\s\S]*?(<\/body>)/i, `$1${bodyHtml}$2`);
 
-// 预览注入脚本：body 可编辑（contenteditable），编辑内容经 postMessage 同步回编辑器
-// 发送前克隆 body 并移除 script/style，避免脚本内容混入编辑文档
-const PREVIEW_EDIT_SCRIPT = `<script id="tiptap-preview-edit">(function(){if(window.parent===window)return;document.body.setAttribute("contenteditable","true");var t=null;document.addEventListener("input",function(){clearTimeout(t);t=setTimeout(function(){try{var c=document.body.cloneNode(true);c.querySelectorAll("script,style").forEach(function(n){n.remove()});window.parent.postMessage({type:"tiptap-preview-edit",html:c.innerHTML},"*")}catch(e){}},400)})})();<\/script>`;
-
-// v0.1.13 第二十六轮:TOC 改为 TocFloating React Portal 方案,
-// 预览视图在 iframe 内不显示浮动目录(用户切回编辑视图即可看到目录);
-// 保留 PREVIEW_EDIT_SCRIPT 让用户在 iframe 内直接编辑 + postMessage 同步到主编辑器
+// v0.2.0:preview 视图已移除 — 编辑器视图 = 浏览器视图(WYSIWYG,完全一致),
+// 不再需要 preview 注入脚本 / previewFrame / previewKey。
 
 const emptyDoc = (id: number): DocState => ({
   id,
@@ -124,19 +129,22 @@ function App() {
     () => (localStorage.getItem(THEME_KEY) as ThemeState) || "system"
   );
   const [mode, setMode] = useState<EditMode>("edit");
-  const [previewKey, setPreviewKey] = useState(0);
   const [rawFullDoc, setRawFullDoc] = useState<string | null>(null);
   const [sourceText, setSourceText] = useState("");
+  // v2.0.1:进入源代码视图时保存一份 buildFullDoc 产物,退出时对比;
+  // 如果用户没编辑 sourceText(原样切换),就完全不动 docHtml / shell / isModified,
+  // 实现"切换视图不修改任何代码"。否则 formatHtml 即便 escAttr 修好也还会改空白/缩进。
+  const [sourceTextSnapshot, setSourceTextSnapshot] = useState("");
   const [filePath, setFilePath] = useState<string | null>(null);
   const [isModified, setIsModified] = useState(false);
   const [shell, setShell] = useState<DocShell | null>(null);
-  const [blockPanelPos, setBlockPanelPos] = useState<number | null>(null);
+  const [blockPanelElement, setBlockPanelElement] = useState<HTMLElement | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     blockType: string | null;
     blockAttrs?: Record<string, unknown>;
-    blockPos: number;
+    blockElement: HTMLElement;
   } | null>(null);
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<RibbonTab>("edit");
@@ -149,6 +157,17 @@ function App() {
   const [appVersion, setAppVersion] = useState("");
   const [showAbout, setShowAbout] = useState(false);
   const [startupPromptShown, setStartupPromptShown] = useState(false);
+
+  // v0.1.13 第三十轮:iframe-based 编辑器的 source of truth —
+  // docHtml 保留浏览器原生 HTML 解析结果(<script>/<style>/<button> 全部 WYSIWYG)。
+  // Tiptap state 仅作为 schema 容器供 TocFloating/tocGen 使用,save/preview/export 全部走 docHtml。
+  // 必须在 useEditor 之前声明 — snapshotActive/applyDoc 都要读它。
+  const [docHtml, setDocHtml] = useState<string>("<p></p>");
+  // v2.1.0:文档设计 — 纯内存 state,不持久化到 localStorage / DocState
+  // 设计 CSS 注入 shell.head(由 buildFullDoc 自动包含在保存的 HTML)
+  const [currentDesignId, setCurrentDesignId] = useState<string | null>(null);
+  // iframe ref:让 Ribbon 等组件能直接访问 iframe.contentDocument 执行 execCommand
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // ---- 启动加载最近文件 / 最近颜色 ----
   useEffect(() => {
@@ -290,31 +309,70 @@ function App() {
     if (editor) setWordCount(editor.getText().replace(/\s+/g, "").length);
   }, [editor]);
 
-  // v0.1.13 第二十七轮:跟踪 doc-toc 状态 + toggle 按钮
-  // doc-toc 状态由 doc content 推算(doc 是否含 docToc atom),不需要单独 state 持久化
-  const refreshTocEnabled = useCallback(() => {
-    if (!editor) return;
-    setTocEnabled(hasTocInDoc(editor));
-  }, [editor]);
-
+  // v0.1.13 第三十轮:tocEnabled 由 docHtml 推算(字符串层检测 doc-toc 节点)
+  // 不依赖 Tiptap PM(editor 状态在 iframe-based 编辑下不再实时反映 docHtml)
   useEffect(() => {
-    if (!editor) return;
-    // 初次 + editor update 时刷新 tocEnabled
-    refreshTocEnabled();
-    const onUpdate = () => refreshTocEnabled();
-    editor.on("update", onUpdate);
-    return () => {
-      editor.off("update", onUpdate);
-    };
-  }, [editor, refreshTocEnabled]);
+    setTocEnabled(hasDocTocInHtml(docHtml));
+  }, [docHtml]);
 
-  // toggle:插入或删除 doc-toc atom,返回新状态
+  // toggle:插入/删除 doc-toc atom,同时同步 shell.head 中的 TOC CSS
+  // 第三十轮:CSS 集中在 <head>(便于 saved file 浏览器查看 + 编辑器 iframe WYSIWYG 一致)
   const onToggleToc = useCallback(() => {
-    if (!editor) return;
-    const next = toggleToc(editor);
-    setTocEnabled(next);
-    updateActiveDoc({ tocEnabled: next });
-  }, [editor, updateActiveDoc]);
+    const { html, enabled } = toggleDocTocInHtml(docHtml);
+    setDocHtml(html);
+    setTocEnabled(enabled);
+    updateActiveDoc({ tocEnabled: enabled });
+    // 同步 shell.head — 插入/移除 <style id="wp-toc-style">
+    // shell 改变 → useMemo [activeDoc.id, shell] 重算 → iframe.srcDoc 更新 → iframe 重新加载
+    // (用户不在 toggle 期间打字,可接受;TOC toggle 是低频操作)
+    const baseShell: DocShell = shell ?? {
+      doctype: "<!DOCTYPE html>",
+      head: "",
+      headCss: "",
+      bodyAttrs: "",
+      scripts: "",
+      styles: "",
+      baseHref: "",
+    };
+    const newHead = enabled
+      ? (baseShell.head.includes("wp-toc-style")
+          // v2.0.3:已有 wp-toc-style 但可能缺注释 — 强制 refresh 确保样式 tag 带标记
+          ? removeTocStyleTag(baseShell.head) + "\n" + buildTocStyleTag()
+          : baseShell.head + buildTocStyleTag())
+      : removeTocStyleTag(baseShell.head);
+    if (newHead !== baseShell.head) {
+      const newShell = { ...baseShell, head: newHead };
+      setShell(newShell);
+      updateActiveDoc({ shell: newShell });
+    }
+  }, [docHtml, shell, updateActiveDoc]);
+
+  // v2.1.0:applyDesign — 注入/清除设计 CSS 到 shell.head
+  // - id 为 null:移除所有 [data-weavepage-design] style
+  // - id 非 null:在 <style id="wp-toc-style"> 之后插入新 style
+  // shell 变化 → useMemo [activeDoc.id, shell] 重算 → iframe.srcDoc 重渲 → WYSIWYG 立即生效
+  const applyDesign = useCallback(
+    (id: string | null) => {
+      const design = getDesignById(id);
+      const css = design?.css ?? null;
+      const baseShell: DocShell = shell ?? {
+        doctype: "<!DOCTYPE html>",
+        head: "",
+        headCss: "",
+        bodyAttrs: "",
+        scripts: "",
+        styles: "",
+        baseHref: "",
+      };
+      const newHead = applyDesignToShellHead(baseShell.head, id, css);
+      const newShell = { ...baseShell, head: newHead };
+      setShell(newShell);
+      setCurrentDesignId(id);
+      setIsModified(true);
+      updateActiveDoc({ shell: newShell });
+    },
+    [shell, updateActiveDoc]
+  );
 
   // v0.1.13 第二十六轮:TOC 由 TocFloating.tsx(React Portal)渲染,
   // 内部监听 editor.on("update") 自动重算 heading id + 写入 PM state。
@@ -332,32 +390,57 @@ function App() {
       if (d.kind === "html") {
         // 包含当前 tocEnabled 状态(从 doc content 推算的 cache)
         const tocOn = d.tocEnabled ?? false;
-        return { ...d, body: editor.getHTML(), sourceText, mode, shell, rawFullDoc, filePath, isModified, tocEnabled: tocOn };
+        // 第三十轮:用 docHtml 而非 editor.getHTML() 持久化 —
+        // iframe WYSIWYG 编辑不会触发 editor.onUpdate,docHtml 才是 source of truth
+        return { ...d, body: docHtml, sourceText, mode, shell, rawFullDoc, filePath, isModified, tocEnabled: tocOn };
       }
       return { ...d, filePath, isModified };
     });
-  }, [docs, activeId, editor, sourceText, mode, shell, rawFullDoc, filePath, isModified]);
+  }, [docs, activeId, docHtml, sourceText, mode, shell, rawFullDoc, filePath, isModified]);
 
   // ---- 应用某个文档到界面 ----
   const applyDoc = useCallback(
     (doc: DocState) => {
-      setBlockPanelPos(null);
+      setBlockPanelElement(null);
       setFilePath(doc.filePath);
       setIsModified(doc.isModified);
       if (doc.kind === "html") {
-        editor?.commands.setContent(doc.body || "<p></p>");
-        // v0.1.13 第二十七轮:setContent 后 doc-toc atom 已被 parse,刷新 tocEnabled 状态
-        if (editor) {
-          setTocEnabled(hasTocInDoc(editor));
-          // v0.1.13 第二十八轮:refresh doc-toc atom 的 tocHtml 为最新版本(inline style)
-          // — 旧版 HTML 用 <style> 块(Tiptap PM 不生效),加载后 rebuild 为 inline style
-          if (hasTocInDoc(editor)) {
-            refreshTocHtml(editor);
-          }
+        // 第三十轮:用原始 doc.body 同步 docHtml(保留 <script>/<style>/<button> 等 WYSIWYG 元素)
+        // 不要用 editor.getHTML() — Tiptap schema 会 strip 未知元素,破坏 WYSIWYG
+        setDocHtml(doc.body || "<p></p>");
+        // 第三十轮:tocEnabled 由 docHtml 字符串检测(useEffect 自动响应 docHtml 变化)
+        // 旧版 HTML(<style> 块 tocHtml)需要 rebuild 为 inline style:
+        // 扫描 docHtml h2/h3 → 写 id 到 heading → 重生成 doc-toc atom
+        if (hasDocTocInHtml(doc.body || "")) {
+          const entries = scanHeadingsFromHtml(doc.body);
+          const newHtml = assignHeadingIdsInHtml(doc.body, entries);
+          // v2.0.3:重生成 tocHtml 结构,确保注释标记 / 最新 buildTocHtml 输出
+          // 应用到旧文件(老版本 WeavePage 保存的 TOC 没有注释)
+          const refreshed = toggleDocTocInHtml(newHtml); // off
+          const final = toggleDocTocInHtml(refreshed.html); // on
+          setDocHtml(final.html);
+          // v2.0.3:同样刷新 shell.head 里的 style tag(老版本没注释),
+          // 否则源代码视图 <head> 区域不会看到 <!-- WeavePage TOC: 样式 -->
+          const baseShell: DocShell = {
+            doctype: doc.shell?.doctype ?? "<!DOCTYPE html>",
+            head: doc.shell?.head ?? "",
+            headCss: doc.shell?.headCss ?? "",
+            bodyAttrs: doc.shell?.bodyAttrs ?? "",
+            scripts: doc.shell?.scripts ?? "",
+            styles: doc.shell?.styles ?? "",
+            baseHref: doc.shell?.baseHref ?? "",
+          };
+          const refreshedHead = removeTocStyleTag(baseShell.head) + "\n" + buildTocStyleTag();
+          setShell({ ...baseShell, head: refreshedHead });
+        } else {
+          setShell(doc.shell ?? null);
         }
+        // v2.1.0:解析当前设计 id,用于面板高亮
+        setCurrentDesignId(parseDesignId(doc.shell?.head ?? ""));
+        // editor 仍 setContent(保留给将来 stage 5 切换,但不影响 docHtml)
+        editor?.commands.setContent(doc.body || "<p></p>");
         setMode(doc.mode);
         setSourceText(doc.sourceText);
-        setShell(doc.shell);
         setRawFullDoc(doc.rawFullDoc);
         setWordCount(editor ? editor.getText().replace(/\s+/g, "").length : 0);
       } else {
@@ -418,6 +501,8 @@ function App() {
     setDocs([...updated, doc]);
     setActiveId(id);
     editor.commands.setContent("<p></p>");
+    // 第三十轮:同步 docHtml(让 iframe 显示空白)
+    setDocHtml("<p></p>");
     setMode("edit");
     setSourceText("");
     setShell(null);
@@ -523,7 +608,7 @@ function App() {
         .map((s) => s.textContent ?? "")
         .join("\n");
       const bodyAttrs = Array.from(doc.body.attributes)
-        .map((a) => ` ${a.name}="${a.value}"`)
+        .map((a) => ` ${a.name}="${escAttr(a.value)}"`)
         .join("");
       const collect = (tag: string) =>
         Array.from(doc.body.querySelectorAll(tag))
@@ -553,13 +638,15 @@ ${bodyStyles}
 
   // ---- 用内容 + 外壳重建完整 HTML ----
   const buildFullDoc = useCallback(
-    (bodyHtml: string, sh: DocShell | null): string => {
+    (bodyHtml: string, sh: DocShell | null, editable: boolean = false): string => {
       if (sh) {
         const base = sh.baseHref ? `<base href="${encodeURI(sh.baseHref)}">` : "";
+        // v0.1.13 第三十轮:editable 模式下 body 加 contenteditable=true,iframe 内可直接编辑
+        const bodyEditable = editable ? ' contenteditable="true"' : "";
         return `${sh.doctype}
 <html>
 <head>${base}${sh.head}</head>
-<body${sh.bodyAttrs}>
+<body${sh.bodyAttrs}${bodyEditable}>
 ${bodyHtml}
 ${sh.scripts}
 ${sh.styles}
@@ -567,6 +654,7 @@ ${sh.styles}
 </html>`;
       }
       const title = (filePath?.split("\\").pop() ?? "文档").replace(/\.html?$/, "");
+      const bodyEditable = editable ? ' contenteditable="true"' : "";
       return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -575,7 +663,7 @@ ${sh.styles}
 <title>${title}</title>
 <style>body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.7;max-width:794px;margin:0 auto;padding:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px}blockquote{border-left:3px solid #ccc;margin:0.5em 0;padding-left:1em;color:#666}pre{background:#f0f0f0;padding:1em;border-radius:6px;overflow-x:auto}code{background:#f0f0f0;padding:0.2em 0.4em;border-radius:3px}img{max-width:100%;height:auto}</style>
 </head>
-<body>${bodyHtml}</body>
+<body${bodyEditable}>${bodyHtml}</body>
 </html>`;
     },
     [filePath]
@@ -715,7 +803,7 @@ ${sh.styles}
         .map((s) => s.textContent ?? "")
         .join("\n");
       const bodyAttrs = Array.from(doc.body.attributes)
-        .map((a) => ` ${a.name}="${a.value}"`)
+        .map((a) => ` ${a.name}="${escAttr(a.value)}"`)
         .join("");
       const collect = (tag: string) =>
         Array.from(doc.body.querySelectorAll(tag))
@@ -730,6 +818,8 @@ ${sh.styles}
         baseHref: shell?.baseHref ?? "",
       };
       editor.commands.setContent(doc.body.innerHTML || "<p></p>");
+      // 第三十轮:用原始 bodyHtml 同步 docHtml(保留 WYSIWYG 元素,不经过 Tiptap schema strip)
+      setDocHtml(doc.body.innerHTML || "<p></p>");
       setShell(newShell);
       setRawFullDoc(fullHtml);
       // setContent 触发的 onUpdate 会把 isModified 置 true，这里按场景覆盖回正确状态
@@ -750,7 +840,9 @@ ${sh.styles}
       } else if (mode === "source") {
         content = sourceText; // 源码编辑的是完整文档
       } else {
-        content = buildFullDoc(editor.getHTML(), shell);
+        // v0.1.13 第三十轮:用 docHtml 而非 editor.getHTML() —
+        // editor 状态不会随 iframe 内 WYSIWYG 编辑更新;docHtml 才是 source of truth
+        content = buildFullDoc(docHtml, shell);
       }
       await writeTextFile(path, content);
       setFilePath(path);
@@ -819,16 +911,17 @@ ${sh.styles}
       });
       if (!selected) return;
       const path = selected.endsWith(".html") ? selected : selected + ".html";
-      await writeTextFile(path, buildFullDoc(editor.getHTML(), shell));
+      // v0.1.13 第三十轮:用 docHtml 保留 iframe WYSIWYG 内容
+      await writeTextFile(path, buildFullDoc(docHtml, shell));
     } catch (e) {
       console.error("导出失败:", e);
       window.alert("导出失败：" + String(e));
     }
   }, [editor, buildFullDoc, shell]);
 
-  // ---- 图片插入 ----
+  // ---- 图片插入(第三十轮:用 iframeExec 插入 base64 img)----
   const insertImage = useCallback(async () => {
-    if (!editor) return;
+    if (!iframeRef.current) return;
     try {
       const selected = await open({
         multiple: false,
@@ -854,34 +947,48 @@ ${sh.styles}
         : ext === "bmp" ? "image/bmp"
         : "image/png";
       const base64 = btoa(binary);
-      editor.chain().focus().setImage({ src: `data:${mime};base64,${base64}` }).run();
+      // 用 iframeExec 插入 img 标签(浏览器原生,无需 Tiptap schema)
+      const win = iframeRef.current.contentWindow;
+      const doc = iframeRef.current.contentDocument;
+      if (win && doc) {
+        win.focus();
+        doc.body.focus();
+        const imgTag = `<img src="data:${mime};base64,${base64}" style="max-width:100%"><p><br></p>`;
+        doc.execCommand("insertHTML", false, imgTag);
+      }
     } catch (e) {
       console.error("插入图片失败:", e);
       window.alert("插入图片失败：" + String(e));
     }
-  }, [editor]);
+  }, []);
 
-  // ---- 表格 ----
-  const insertTable = useCallback(
-    (rows: number, cols: number) => {
-      editor?.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run();
-    },
-    [editor]
-  );
-
-  const deleteTable = useCallback(() => {
-    editor?.chain().focus().deleteTable().run();
-  }, [editor]);
-
-  // ---- 链接 ----
+  // ---- 链接(第三十轮:用 iframeExec createLink/unlink)----
   const setLink = useCallback(() => {
-    if (!editor) return;
-    const prev = editor.getAttributes("link").href;
-    const url = window.prompt("输入链接 URL", prev || "https://");
+    if (!iframeRef.current) return;
+    const win = iframeRef.current.contentWindow;
+    const doc = iframeRef.current.contentDocument;
+    if (!win || !doc) return;
+    win.focus();
+    doc.body.focus();
+    // 取当前选区第一个链接(若已选中)
+    const sel = doc.getSelection();
+    const existingHref = (() => {
+      if (!sel || !sel.anchorNode) return "";
+      let n: Node | null = sel.anchorNode;
+      while (n && n.nodeType === 1) {
+        if ((n as Element).tagName === "A") return (n as HTMLAnchorElement).href || "";
+        n = n.parentNode;
+      }
+      return "";
+    })();
+    const url = window.prompt("输入链接 URL(留空移除)", existingHref || "https://");
     if (url === null) return;
-    if (url === "") editor.chain().focus().unsetLink().run();
-    else editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
-  }, [editor]);
+    if (url === "") {
+      doc.execCommand("unlink", false);
+    } else {
+      doc.execCommand("createLink", false, url);
+    }
+  }, []);
 
   // ---- 模式切换（编辑 / 源码 / 预览） ----
   const changeMode = useCallback(
@@ -889,46 +996,83 @@ ${sh.styles}
       if (!editor) return;
       if (activeDoc.kind === "text") return; // 文本标签只有文本编辑
       if (next === mode) return;
+      // 源码 → 编辑:只有 sourceText 真正变化才 syncFromSource,否则跳过一切修改
+      //(保证"打开源代码视图看一眼,关掉"完全不修改 docHtml / shell / isModified)
       if (mode === "source") {
-        try {
-          syncFromSource(sourceText, true);
-        } catch (e) {
-          console.error("源码解析失败:", e);
-          window.alert("源码解析失败，请检查 HTML 语法");
-          return;
+        if (sourceText !== sourceTextSnapshot) {
+          try {
+            syncFromSource(sourceText, true);
+          } catch (e) {
+            console.error("源码解析失败:", e);
+            window.alert("源码解析失败，请检查 HTML 语法");
+            return;
+          }
+        } else {
+          // 未编辑:还原 isModified 标记(进入源码视图前可能是 modified,这里不能改 docHtml)
+          // 不动 docHtml / shell — 这就是"零修改"路径
         }
       }
       if (next === "source") {
         // 源码视图显示完整页面（head 部分、CSS、JS 全部可见可编辑）
-        setSourceText(formatHtml(buildFullDoc(editor.getHTML(), shell)));
+        // v2.0.1:formatHtml 只调整空白(块级缩进/换行),不修改任何字符。
+        // 配合 sourceTextSnapshot,未编辑切回时直接跳过 syncFromSource,实现
+        // "切换视图不修改任何代码"。
+        const newSourceText = formatHtml(buildFullDoc(docHtml, shell));
+        setSourceText(newSourceText);
+        setSourceTextSnapshot(newSourceText);
       }
       setMode(next);
     },
-    [editor, activeDoc, mode, sourceText, syncFromSource, buildFullDoc, shell]
+    [editor, activeDoc, mode, sourceText, sourceTextSnapshot, syncFromSource, buildFullDoc, shell]
   );
 
   // ---- 右键：弹出 EditorContextMenu(块源码 / 设为默认样式) ----
-  const handleEditorContextMenu = useCallback(
-    (e: React.MouseEvent) => {
-      if (!editor || activeDoc.kind !== "html" || mode !== "edit") return;
-      const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
-      if (coords == null) return;
-      const $pos = editor.state.doc.resolve(coords.pos);
-      let depth = $pos.depth;
-      while (depth > 0 && !$pos.node(depth).isBlock) depth--;
-      if (depth === 0) return;
-      e.preventDefault();
-      const node = $pos.node(depth);
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        blockType: node.type.name,
-        blockAttrs: node.attrs as Record<string, unknown>,
-        blockPos: $pos.before(depth),
-      });
-    },
-    [editor, activeDoc, mode]
-  );
+// 第三十轮:iframe-based — 用 iframe.contentDocument.elementFromPoint 找块元素
+const findBlockAtClientPoint = (
+  iframe: HTMLIFrameElement,
+  clientX: number,
+  clientY: number
+): HTMLElement | null => {
+  const doc = iframe.contentDocument;
+  if (!doc) return null;
+  const rect = iframe.getBoundingClientRect();
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  let el: Element | null = doc.elementFromPoint(x, y);
+  if (!(el instanceof HTMLElement)) return null;
+  // 向上找到最近的 block 元素
+  let cur: HTMLElement | null = el;
+  while (cur && cur !== doc.body) {
+    const display = window.getComputedStyle(cur).display;
+    if (!display.startsWith("inline")) return cur;
+    cur = cur.parentElement;
+  }
+  return el;
+};
+const handleEditorContextMenu = useCallback(
+  (e: React.MouseEvent) => {
+    if (activeDoc.kind !== "html" || mode !== "edit") return;
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    // 判断事件是不是来自 iframe
+    const tgt = e.target as Element | null;
+    if (tgt && tgt.tagName !== "IFRAME") {
+      // 事件来自 .editor-scroll 自身(罕见)
+      return;
+    }
+    const blockEl = findBlockAtClientPoint(iframe, e.clientX, e.clientY);
+    if (!blockEl) return;
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      blockType: blockEl.tagName.toLowerCase(),
+      blockAttrs: {} as Record<string, unknown>,
+      blockElement: blockEl,
+    });
+  },
+  [activeDoc, mode]
+);
 
   // ---- 页面背景色:写到 shell.head + shell.headCss(body 规则,被 scopedCss 改名为 .editor-scroll .editor-body)----
   // 空文档(shell=null):用最小 DocShell 兜底,使背景能立刻生效,保存时也能带上 body bg
@@ -952,66 +1096,124 @@ ${sh.styles}
     [shell, updateActiveDoc]
   );
 
-// ---- 段间距:对每个选中块直接写 inline style(Tiptap 命令链对 inline style 不友好)----
-  const handleSpacingChange = useCallback(
-    (s: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => {
-      if (!editor) return;
-      const { state } = editor;
-      const { from, to } = state.selection;
-      let touched = false;
-      state.doc.nodesBetween(from, to, (_node, pos) => {
-        const dom = editor.view.nodeDOM(pos);
-        if (!(dom instanceof HTMLElement)) return;
-        // 跳过 inline / text 节点;只对块级元素改 inline style
-        const display = window.getComputedStyle(dom).display;
-        if (display.startsWith("inline")) return;
-        let style = dom.getAttribute("style") ?? "";
-        if (s.lineHeight !== undefined) {
-          style = applyLineHeight(style, s.lineHeight);
-          touched = true;
+// ---- 段间距:对选区所在块(及祖先 block 元素)直接写 inline style ----
+// 第三十轮:iframe-based — 找 iframe.contentDocument 中选区所在的块级元素
+const isBlockLike = (el: Element): boolean => {
+  const display = window.getComputedStyle(el).display;
+  return !display.startsWith("inline");
+};
+const handleSpacingChange = useCallback(
+  (s: { lineHeight?: number; marginTop?: number; marginBottom?: number }) => {
+    if (!iframeRef.current) return;
+    const doc = iframeRef.current.contentDocument;
+    if (!doc) return;
+    const sel = doc.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    // 收集 range 内所有块级祖先元素(每个独立段落)
+    const blocks = new Set<HTMLElement>();
+    const collect = (node: Node | null) => {
+      let n: Node | null = node;
+      while (n) {
+        if (n.nodeType === 1 && isBlockLike(n as Element)) {
+          blocks.add(n as HTMLElement);
+          break;
         }
-        if (s.marginTop !== undefined) {
-          style = applyParagraphSpacing(style, "top", s.marginTop);
-          touched = true;
-        }
-        if (s.marginBottom !== undefined) {
-          style = applyParagraphSpacing(style, "bottom", s.marginBottom);
-          touched = true;
-        }
-        dom.setAttribute("style", style);
-      });
-      if (touched) {
-        // 触发编辑器 onChange(空事务即可拿到 body 新 html)
-        editor.view.dispatch(editor.state.tr);
-        setIsModified(true);
-        updateActiveDoc({ isModified: true });
+        n = n.parentNode;
       }
-    },
-    [editor, updateActiveDoc]
-  );
+    };
+    collect(range.startContainer);
+    collect(range.endContainer);
+    // range 中间扫一遍 DOM 找 block 元素
+    const root = range.commonAncestorContainer;
+    const walker = doc.createTreeWalker(
+      root.nodeType === 1 ? (root as Element) : (root.parentNode as Element),
+      NodeFilter.SHOW_ELEMENT,
+      null
+    );
+    let walkNode: Node | null = walker.nextNode();
+    while (walkNode) {
+      if (isBlockLike(walkNode as Element)) {
+        // 看是否在 range 内
+        const r: Range | null = doc.createRange();
+        if (r) {
+          r.selectNode(walkNode);
+          if (
+            r.compareBoundaryPoints(Range.START_TO_END, range) >= 0 &&
+            r.compareBoundaryPoints(Range.END_TO_START, range) <= 0
+          ) {
+            blocks.add(walkNode as HTMLElement);
+          }
+        }
+      }
+      walkNode = walker.nextNode();
+    }
+    if (blocks.size === 0) return;
+    let touched = false;
+    blocks.forEach((dom) => {
+      let style = dom.getAttribute("style") ?? "";
+      if (s.lineHeight !== undefined) {
+        style = applyLineHeight(style, s.lineHeight);
+        touched = true;
+      }
+      if (s.marginTop !== undefined) {
+        style = applyParagraphSpacing(style, "top", s.marginTop);
+        touched = true;
+      }
+      if (s.marginBottom !== undefined) {
+        style = applyParagraphSpacing(style, "bottom", s.marginBottom);
+        touched = true;
+      }
+      dom.setAttribute("style", style);
+    });
+    if (touched) {
+      // 触发 input 事件 → App.tsx 的 iframe onLoad handler 会 setDocHtml(body.innerHTML)
+      doc.body.dispatchEvent(new Event("input", { bubbles: true }));
+      setIsModified(true);
+      updateActiveDoc({ isModified: true });
+    }
+  },
+  [updateActiveDoc]
+);
 
   // ---- 读取当前块的「显式改过」的 8 项属性(白名单)----
-  const readBlockExplicitProps = useCallback((): Record<string, string> => {
-    if (!editor) return {};
+  // 第三十轮:iframe-based — 直接读 blockEl 的 inline style + 选区内 inline mark
+  const readBlockExplicitProps = useCallback((el: HTMLElement | null): Record<string, string> => {
+    if (!el) return {};
     try {
-      const { from } = editor.state.selection;
-      const dom = editor.view.domAtPos(from).node;
-      const el = dom instanceof Element ? dom : (dom.parentElement ?? null);
       if (!(el instanceof HTMLElement)) return {};
       // inline 节点(光标在 span 内)跳过;只对块级元素读 inline style
       const display = window.getComputedStyle(el).display;
       if (display.startsWith("inline")) return {};
       const props: Record<string, string> = {};
 
-      // textStyle mark 属性
-      const ts = editor.getAttributes("textStyle");
-      if (ts.fontFamily) props["font-family"] = String(ts.fontFamily);
-      if (ts.fontSize) props["font-size"] = String(ts.fontSize);
-      if (ts.color) props.color = String(ts.color);
-
-      // highlight mark → background-color
-      const hl = editor.getAttributes("highlight");
-      if (hl.color) props["background-color"] = String(hl.color);
+      // textStyle / highlight 通过 inline style / font tag 读(iframe 内 Tiptap mark 不存在)
+      // font-family / font-size / color:用选区 range 的 computedStyle
+      const doc = el.ownerDocument;
+      if (doc) {
+        const sel = doc.getSelection();
+        if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const inlineEl = range.startContainer.parentElement;
+          if (inlineEl instanceof HTMLElement) {
+            const cs = window.getComputedStyle(inlineEl);
+            if (cs.fontFamily) props["font-family"] = cs.fontFamily;
+            if (cs.fontSize && cs.fontSize !== "16px") {
+              // px → pt
+              const px = parseFloat(cs.fontSize);
+              if (isFinite(px) && px > 0) {
+                props["font-size"] = `${Math.round(px * 0.75 * 2) / 2}pt`;
+              }
+            }
+            if (cs.color && cs.color !== "rgb(0, 0, 0)") props.color = cs.color;
+            // highlight:从 inline style background-color 读
+            const styleBg = inlineEl.style.backgroundColor || cs.backgroundColor;
+            if (styleBg && styleBg !== "rgba(0, 0, 0, 0)" && styleBg !== "transparent") {
+              props["background-color"] = styleBg;
+            }
+          }
+        }
+      }
 
       // 块 inline style:取 text-align / line-height / margin-top / margin-bottom
       const styleStr = el.getAttribute("style") ?? "";
@@ -1034,29 +1236,20 @@ ${sh.styles}
     } catch {
       return {};
     }
-  }, [editor]);
+  }, []);
 
   // ---- 「设为默认样式」:把当前块显式属性 upsert 进 head 内嵌命名块 ----
-  const handleSetAsDefault = useCallback(() => {
-    if (!editor || !shell) return;
-    const { state } = editor;
-    const { from } = state.selection;
-    const $pos = state.doc.resolve(from);
-    let depth = $pos.depth;
-    while (depth > 0 && !$pos.node(depth).isBlock) depth--;
-    if (depth === 0) return;
-    const node = $pos.node(depth);
-    const selector = blockTypeToSelector(
-      node.type.name,
-      node.attrs as Record<string, unknown>,
-    );
+  // 第三十轮:用 contextMenu.blockElement 而非 editor.selection
+  const handleSetAsDefault = useCallback((el: HTMLElement | null) => {
+    if (!el || !shell) return;
+    const selector = blockTypeToSelector(el.tagName.toLowerCase(), {});
     if (!selector) return;
-    const props = readBlockExplicitProps();
+    const props = readBlockExplicitProps(el);
     if (Object.keys(props).length === 0) return;
     const { head, headCss } = upsertShellHead(shell.head, selector, props);
     updateActiveDoc({ shell: { ...shell, head, headCss } });
     setShell({ ...shell, head, headCss });
-  }, [editor, shell, readBlockExplicitProps, updateActiveDoc]);
+  }, [shell, readBlockExplicitProps, updateActiveDoc]);
 
   // ---- 快捷键 ----
   const refs = useRef({
@@ -1072,33 +1265,9 @@ ${sh.styles}
   refs.current.open = openFile;
   refs.current.new = newDoc;
   refs.current.close = () => closeDoc(activeId);
-  refs.current.togglePreview = () => {
-    if (activeDoc.kind === "html") changeMode(mode === "preview" ? "edit" : "preview");
-  };
 
-  // 刷新预览：把当前编辑器内容注入原始 HTML 的 body 替换，重载 iframe
-  const refreshPreview = useCallback(() => {
-    if (!editor || activeDoc.kind === "text") return;
-    setRawFullDoc((prev) => (prev ? injectBody(prev, editor.getHTML()) : prev));
-    setMode("preview");
-    setPreviewKey((k) => k + 1);
-  }, [editor, activeDoc]);
-
-  // 预览中直接编辑：接收 iframe postMessage，同步回编辑器
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      const data = e.data as { type?: string; html?: string } | null;
-      if (!data || data.type !== "tiptap-preview-edit" || typeof data.html !== "string") return;
-      if (mode !== "preview" || !editor) return;
-      editor.commands.setContent(data.html);
-      setIsModified(true);
-      updateActiveDoc({ isModified: true });
-      // 同步到预览文档，切走再切回预览时内容一致
-      setRawFullDoc((prev) => (prev ? injectBody(prev, data.html!) : prev));
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [mode, editor, updateActiveDoc]);
+  // v0.2.0:refreshPreview / togglePreview / preview postMessage handler 已移除
+  // (preview 视图不再存在,编辑器视图 = 浏览器视图)
 
   // v0.1.13 第二十六轮:TocFloating.tsx 用 React onMouseEnter/Leave/onClick
 // 处理交互(hover 展开 / 鼠标移开收起 / click 跳转),不再需要 document click 委托
@@ -1125,29 +1294,41 @@ ${sh.styles}
         e.preventDefault();
         refs.current.close();
       }
-      if (e.key === "F5") {
-        e.preventDefault();
-        refreshPreview();
-      }
-      if (e.key === "F9") {
-        e.preventDefault();
-        refs.current.togglePreview();
-      }
+      // v0.2.0:F5/F9 预览快捷键已移除(预览视图不再存在)
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [refreshPreview]);
+  }, []);
 
-  if (!editor) return null;
+  // 第三十轮:不再 early return `if (!editor) return null` —
+  // editor 在第一渲染时是 null(react useEditor 异步初始化),
+  // 下面的 useMemo 必须在条件 return 之前调用,否则 hooks 数量不一致
+  // 会触发 React "Invalid hook call" → 整个 App 渲染失败 → 界面空白。
+  // editor 现在已 vestigial(数据层 schema 占位),UI 全部走 iframeRef/docHtml。
 
   const viewClass = viewMode === "page" ? "editor-page" : "editor-wide";
-  const basePreview = (rawFullDoc ?? buildFullDoc(editor.getHTML(), shell));
-  // v0.1.13 第二十六轮:TOC 由 TocFloating React Portal 渲染(只在编辑视图显示),
-  // 预览 iframe 不再注入 TOC hover/click 处理脚本
-  const previewDoc = basePreview.replace(
-    /<\/body>/i,
-    PREVIEW_EDIT_SCRIPT + "</body>"
+
+  // v0.1.13 第三十轮:iframe-based 编辑器(MVP)
+  // docHtml / iframeRef 已在组件顶部声明(snapshotActive/applyDoc 需要先读 docHtml)
+
+  // 第三十轮:docHtml 是 source of truth(保留 iframe WYSIWYG 原始 HTML)
+  // 不再从 editor.getHTML() 同步 — Tiptap schema 会过滤掉 <script>/<style>/<button> 等,
+  // iframe 内 WYSIWYG 编辑也不会触发 editor.onUpdate。
+  // docHtml 只通过以下途径更新:
+  //   1. applyDoc(doc): 显式 setDocHtml(doc.body) — 加载文件/切换 doc
+  //   2. newDoc(): 显式 setDocHtml("<p></p>")
+  //   3. iframe onLoad → body.addEventListener("input") → setDocHtml(body.innerHTML)
+
+  // 第三十轮关键修复:srcDoc 用 useMemo 缓存,只在 activeDoc.id 或 shell 变化时重建。
+  // 用户在 iframe 内编辑时 setDocHtml → React 不重新设 srcDoc → 浏览器不重新加载 iframe → 光标保留。
+  // (如果直接传 srcDoc={buildFullDoc(docHtml, shell, true)},每次 docHtml 变化 iframe 都重载,光标必丢)
+  const editorSrcDoc = useMemo(
+    () => buildFullDoc(docHtml, shell, /* editable */ true),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeDoc.id, shell]
   );
+
+  // v0.2.0:basePreview / previewDoc 已移除(预览视图不存在,编辑器 = 浏览器)
   const isTextDoc = activeDoc.kind === "text";
   const shownWordCount = isTextDoc ? activeDoc.body.length : wordCount;
 
@@ -1194,15 +1375,11 @@ ${sh.styles}
 
       {/* 功能区按钮行 */}
       <Ribbon
-        editor={editor}
+        iframeRef={iframeRef}
         disabled={mode !== "edit" || isTextDoc}
         activeTab={activeTab}
         collapsed={ribbonCollapsed}
-        previewActive={mode === "preview"}
-        onPreview={() => changeMode(mode === "preview" ? "edit" : "preview")}
         onInsertImage={insertImage}
-        onInsertTable={insertTable}
-        onDeleteTable={deleteTable}
         onLink={setLink}
         recentTextColors={recentColors.text}
         recentHighlightColors={recentColors.highlight}
@@ -1212,6 +1389,9 @@ ${sh.styles}
         tocEnabled={tocEnabled}
         onToggleToc={onToggleToc}
         tocDisabled={mode !== "edit" || isTextDoc}
+        currentDesignId={currentDesignId}
+        onApplyDesign={applyDesign}
+        designDisabled={mode !== "edit" || isTextDoc}
       />
 
       {/* 主区域：侧边栏 + 内容 */}
@@ -1232,25 +1412,6 @@ ${sh.styles}
               spellCheck={false}
               wrap="soft"
             />
-          ) : mode === "preview" ? (
-            <>
-              <div className="preview-bar">
-                <span className="preview-bar-title">网页预览 · 可直接编辑</span>
-                <button onClick={refreshPreview} title="将编辑器内容同步到预览 (F5)">
-                  刷新
-                </button>
-                <button onClick={() => changeMode("edit")} title="返回编辑模式">
-                  关闭
-                </button>
-              </div>
-              <iframe
-                key={previewKey}
-                className="preview-frame"
-                srcDoc={previewDoc}
-                title="网页预览"
-                sandbox="allow-scripts"
-              />
-            </>
           ) : mode === "source" ? (
             <textarea
               className="source-view"
@@ -1265,32 +1426,58 @@ ${sh.styles}
               {activeDoc.kind === "html" && shell?.headCss && (
                 <style>{scopedCss(shell.headCss)}</style>
               )}
-              {/* v0.1.13 第二十九轮:TOC UI 双轨方案
-                  1. 编辑器视图:React Portal TocFloating(整段挂到 document.body,
-                     避开 .editor-body contenteditable + .ProseMirror 等祖先,
-                     让 wrap position: fixed 锁 viewport 真正生效)
-                  2. 预览 iframe:doc-toc atom 自身的 inline style(独立 document)
-                  3. 浏览器 export:doc-toc atom inline style
-                  4. doc-toc atom 仍存 tocHtml attr(可保存),只是编辑器视图视觉
-                     用 React UI(用 CSS 让 atom 在 editor view 隐藏,
-                     但 atom 数据保留,saved HTML 不受影响)
+              {/* v0.1.13 第三十轮:iframe-based 编辑器(MVP)
+                  - <EditorContent>(Tiptap PM view)替换为 <iframe srcDoc=docHtml contentEditable>
+                  - 浏览器原生 HTML 解析,所有 <style> <script> <button> 等都 WYSIWYG
+                  - iframe onInput → setDocHtml(用户编辑反馈,无需重建 iframe)
+                  - Tiptap 仍 work(setContent 用于 save + toolbar),但 view 层用 iframe
+                  - srcDoc 用 useMemo(editorSrcDoc)缓存 → 只在 activeDoc.id/shell 变化时重建,
+                    用户编辑期间不重新加载 iframe → 光标保留
               */}
-              <EditorContent editor={editor} />
-              {/* v0.1.13 第二十九轮:WYSIWYG — React Portal TocFloating 只在 doc 含 doc-toc atom 时显示
-                  html 不含 TOC → 编辑器内也不显示 TOC(跟浏览器打开一致) */}
-              {mode === "edit" && activeDoc.kind === "html" && tocEnabled && (
-                <TocFloating editor={editor} enabled={true} />
-              )}
+              <iframe
+                key={activeDoc.id}
+                ref={iframeRef}
+                title="editor"
+                className="editor-iframe"
+                srcDoc={editorSrcDoc}
+                sandbox="allow-same-origin allow-scripts allow-forms"
+                onLoad={(e) => {
+                  // iframe load 完后绑定 onInput 监听(避免重建 iframe 丢失 focus)
+                  const iframe = e.currentTarget as HTMLIFrameElement;
+                  const doc = iframe.contentDocument;
+                  if (!doc) return;
+                  // 标记 isModified + 同步字数 + docHtml(用户编辑反馈)
+                  doc.body.addEventListener("input", () => {
+                    const html = doc.body.innerHTML;
+                    setDocHtml(html);
+                    setIsModified(true);
+                    updateActiveDoc({ isModified: true });
+                    // 字数统计:用 doc.body.innerText(更准确,跳过 style/script)
+                    setWordCount((doc.body.innerText || "").replace(/\s+/g, "").length);
+                  });
+                }}
+              />
+              {/* v0.1.13 第三十轮:编辑器视图只显示 iframe 内 doc-toc atom(由 shell.head 中 TOC CSS 渲染),
+                  不再额外渲染 TocFloating React Portal — 编辑器视图与浏览器打开完全一致(WYSIWYG)
+                  doc-toc atom 在 iframe 内由 TOC_SCRIPT 处理 hover/click,与 preview iframe 一致 */}
+              {/* v0.1.13 第三十轮:编辑器视图只显示 iframe 内 doc-toc atom(由 shell.head 中 TOC CSS 渲染),
+                  不再额外渲染 TocFloating React Portal — 编辑器视图与浏览器打开完全一致(WYSIWYG)
+                  doc-toc atom 在 iframe 内由 TOC_SCRIPT 处理 hover/click,与 preview iframe 一致 */}
             </div>
           )}
         </div>
 
         {/* 块源代码面板（右键块打开，右侧边栏） */}
-        {blockPanelPos != null && !isTextDoc && mode === "edit" && (
+        {blockPanelElement != null && !isTextDoc && mode === "edit" && (
           <BlockSourcePanel
-            editor={editor}
-            initialPos={blockPanelPos}
-            onClose={() => setBlockPanelPos(null)}
+            element={blockPanelElement}
+            onClose={() => setBlockPanelElement(null)}
+            onApplied={() => {
+              // 应用 HTML 后 iframe DOM 已变,但 docHtml state 未更新;
+              // 手动同步:触发 iframe body 的 input 事件 → setDocHtml
+              const doc = iframeRef.current?.contentDocument;
+              doc?.body.dispatchEvent(new Event("input", { bubbles: true }));
+            }}
           />
         )}
 
@@ -1302,11 +1489,11 @@ ${sh.styles}
             blockType={contextMenu.blockType}
             blockAttrs={contextMenu.blockAttrs}
             onBlockSource={() => {
-              setBlockPanelPos(contextMenu.blockPos);
+              setBlockPanelElement(contextMenu.blockElement);
               setContextMenu(null);
             }}
             onSetAsDefault={() => {
-              handleSetAsDefault();
+              handleSetAsDefault(contextMenu.blockElement);
               setContextMenu(null);
             }}
             onClose={() => setContextMenu(null)}

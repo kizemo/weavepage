@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>文艺书卷 — WeavePage 设计预览</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Source+Code+Pro:wght@400&display=swap" rel="stylesheet">
+<style data-weavepage-design="literary-scroll">
+/* === 文艺书卷 · Literary Scroll === */
+/* 米黄/宣纸底 + 衬线 + 温暖手感 */
+body {
+  background: #f5efe0;
+  color: #3b2f1e;
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', serif;
+  line-height: 1.95;
+  font-size: 17px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 60px 40px;
+}
+h1 {
+  font-size: 2.2em;
+  font-weight: 600;
+  color: #5c3a1e;
+  text-align: center;
+  padding: .5em 0;
+  border-top: 2px solid #b48a4a;
+  border-bottom: 2px solid #b48a4a;
+  margin: 1.2em 0 .8em;
+}
+h2 {
+  font-size: 1.6em;
+  font-weight: 600;
+  color: #5c3a1e;
+  border-left: 6px solid #b48a4a;
+  padding-left: 14px;
+  margin: 1.4em 0 .5em 0;
+}
+h3 {
+  font-size: 1.3em;
+  font-weight: 600;
+  color: #6e4a25;
+  margin: 1.2em 0 .4em;
+}
+h4, h5, h6 {
+  font-weight: 600;
+  color: #6e4a25;
+  margin: 1em 0 .4em;
+}
+p { margin: 1.2em 0; text-align: justify; }
+a {
+  color: #8b4513;
+  text-decoration: none;
+  border-bottom: 1px dotted #b48a4a;
+}
+blockquote {
+  border-left: 3px solid #b48a4a;
+  padding: .5em 1.2em;
+  background: rgba(180, 138, 74, .08);
+  color: #5c3a1e;
+  font-style: italic;
+  margin: 1.2em 0;
+}
+code {
+  font-family: 'Source Code Pro', monospace;
+  background: #ebe3cf;
+  padding: .1em .3em;
+  border-radius: 2px;
+  font-size: .9em;
+  color: #5c3a1e;
+}
+pre {
+  font-family: 'Source Code Pro', monospace;
+  background: #ebe3cf;
+  border: 1px solid #c9b88e;
+  padding: 1em;
+  border-radius: 4px;
+  margin: 1em 0;
+  overflow-x: auto;
+}
+kbd {
+  font-family: monospace;
+  background: #ebe3cf;
+  border: 1px solid #b48a4a;
+  border-radius: 4px;
+  padding: .1em .4em;
+  font-size: .85em;
+  color: #5c3a1e;
+}
+img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #c9b88e;
+  border-radius: 2px;
+}
+figure {
+  text-align: center;
+  margin: 1.8em 0;
+}
+figcaption {
+  font-size: .85em;
+  color: #8b6a45;
+  font-style: italic;
+  margin-top: .5em;
+}
+.fig-placeholder {
+  background: linear-gradient(135deg, #ebe3cf 0%, #c9b88e 100%);
+  width: 100%;
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #5c3a1e;
+  font-style: italic;
+  border: 1px solid #c9b88e;
+}
+table {
+  border-collapse: collapse;
+  border: 1px solid #b48a4a;
+  width: 100%;
+  background: #fdf8eb;
+  margin: 1em 0;
+}
+th, td {
+  border: 1px solid #c9b88e;
+  padding: .6em;
+}
+thead {
+  background: #ebe3cf;
+  font-weight: 700;
+  color: #5c3a1e;
+}
+tr:nth-child(even) { background: #f7f1de; }
+hr {
+  border: none;
+  border-top: 1px dashed #b48a4a;
+  margin: 2em 0;
+}
+ul, ol { padding-left: 1.5em; }
+li { margin: .4em 0; }
+
+/* === 目录样式覆写 === */
+.wp-toc-floating-wrap {
+  background: #fdf8eb;
+  border: 1px solid #c9b88e;
+  font-family: inherit;
+}
+.wp-toc-h2-link { color: #5c3a1e; }
+.wp-toc-h2-item:hover > .wp-toc-h2-link { background: #ebe3cf; }
+.wp-toc-h3-submenu {
+  background: #fdf8eb;
+  border: 1px solid #c9b88e;
+}
+</style>
+</head>
+<body>
+<div style="background:#ebe3cf;border:1px solid #c9b88e;border-radius:6px;padding:8px 14px;margin-bottom:32px;display:inline-block;font-size:13px;color:#8b6a45;font-family:sans-serif;">
+  WeavePage 设计预览 · 文艺书卷 · Literary Scroll
+</div>
+
+<h1>一级标题示例 · Sample H1</h1>
+<h2>二级标题示例 · Sample H2</h2>
+<h3>三级标题示例 · Sample H3</h3>
+
+<p>正文段落示例,展示<strong>粗体</strong>与<em>斜体</em>与<a href="#">链接</a>。英文 Mixed content 用于测试字体降级与混排。段落间距与行高直接决定阅读体验。</p>
+
+<blockquote>「引用块示例,展示左侧边线、背景与字体节奏。」<br>— Author Name</blockquote>
+
+<p>使用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 复制以下代码:</p>
+
+<pre><code>const style = 'applied';
+function applyDesign(id) {
+  console.log('design:', id);
+}</code></pre>
+
+<figure>
+  <div class="fig-placeholder">📜 图片占位 · Image Placeholder 16:9</div>
+  <figcaption>图注示例 · Figure caption</figcaption>
+</figure>
+
+<table>
+  <thead>
+    <tr><th>表头 1</th><th>表头 2</th><th>表头 3</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>单元格 1</td><td>单元格 2</td><td>单元格 3</td></tr>
+    <tr><td>单元格 4</td><td>单元格 5</td><td>单元格 6</td></tr>
+    <tr><td>单元格 7</td><td>单元格 8</td><td>单元格 9</td></tr>
+  </tbody>
+</table>
+
+<ul>
+  <li>列表项 1 — unordered list example</li>
+  <li>列表项 2 — 强调项</li>
+  <li>列表项 3</li>
+</ul>
+
+<hr>
+
+<p style="color:#8b6a45;font-size:.9em;text-align:center;margin-top:2em;font-style:italic;">— 文艺书卷 · Literary Scroll · 预览结束 —</p>
+</body>
+</html>

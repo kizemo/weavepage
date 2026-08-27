@@ -225,44 +225,89 @@ test("assignHeadingIds 修复回归:PM 节点 attrs 同步为新 id(doc 第一�
 });
 
 // ============================================================================
-// v0.1.13 第二十八轮:buildTocHtml(生成 inline doc-toc HTML)
-// ============================================================================ 用 inline style,不依赖 <style> 块
-test("buildTocHtml 含 wrap + button + panel + submenu + script + inline style", () => {
+// v0.1.13 第三十轮:buildTocHtml(只输出 class 结构,无 inline style)
+// CSS 全部由 buildTocStyleTag() 注入到 <head> 中
+test("buildTocHtml 含 wrap + button + panel + h2-item + h3-submenu(作为 wrap 直接子节点) + script", () => {
   const html = buildTocHtml([
     { level: 2, text: "第一章", id: "wp-toc-a" },
     { level: 3, text: "1.1 节", id: "wp-toc-a-2" },
     { level: 2, text: "第二章", id: "wp-toc-b" },
   ]);
-  // 第二十八轮:不再用 <style> 块,所有 CSS 用 inline style
-  assert.doesNotMatch(html, /<style>/);
-  // wrap div + inline style(含 position: fixed)
-  assert.match(html, /<div id="wp-toc-floating-wrap"[^>]*class="wp-toc-floating-wrap"[^>]*style="[^"]*position: fixed/);
-  assert.match(html, /top: 24px/);
-  assert.match(html, /right: 24px/);
-  // button
-  assert.match(html, /<button id="wp-toc-floating-btn"[^>]*style="[^"]*background: #ffffff/);
-  // panel:绝对定位 + 默认 display: none(属性顺序不固定,用单独断言)
-  assert.match(html, /<div id="wp-toc-floating-panel"[^>]*style="[^"]*position: absolute/);
-  assert.match(html, /<div id="wp-toc-floating-panel"[^>]*style="[^"]*display: none/);
-  // h2-item
-  assert.match(html, /<li class="wp-toc-h2-item"[^>]*data-target="wp-toc-a"/);
-  // data-h3-ids + data-h3-texts(JSON)
-  assert.match(html, /data-h3-ids='\["wp-toc-a-2"\]'/);
-  // submenu 绝对定位 + 默认 display: none(属性顺序不固定,用单独断言)
-  assert.match(html, /<div id="wp-toc-h3-submenu"[^>]*style="[^"]*right: 288px/);
-  assert.match(html, /<div id="wp-toc-h3-submenu"[^>]*style="[^"]*display: none/);
-  // script
-  assert.match(html, /<script>[\s\S]*wrap\.addEventListener\('mouseenter'/);
+  // 第三十轮:无 inline style 元素 (style 属性)
+  assert.doesNotMatch(html, /style="/);
+  // wrap div + class
+  assert.match(html, /<div class="wp-toc-floating-wrap">/);
+  assert.match(html, /<button class="wp-toc-floating-btn" type="button">/);
+  // panel
+  assert.match(html, /<div class="wp-toc-floating-panel"/);
+  assert.match(html, /<h3 class="wp-toc-panel-header">/);
+  // h2-item 含 data-target(无内嵌 submenu,submenu 移到 wrap 下)
+  assert.match(html, /<li class="wp-toc-h2-item" data-target="wp-toc-a"/);
+  assert.match(html, /<a href="#wp-toc-a" class="wp-toc-h2-link">/);
+  // 第二章没有 h3,所以没有对应 submenu
+  assert.match(html, /<li class="wp-toc-h2-item" data-target="wp-toc-b">/);
+  // h3-submenu 是 wrap 的直接子节点(panel 之后),用 data-for 关联
+  assert.match(html, /<\/div><div class="wp-toc-h3-submenu" data-for="wp-toc-a" data-h3-ids='\["wp-toc-a-2"\]'/);
+  assert.match(html, /<ul class="wp-toc-h3-submenu-list"><\/ul>/);
+  // script 包含 hover/click 处理
+  assert.match(html, /<script>[\s\S]*wrap\.addEventListener\('click'/);
+  // script 内不再有 style.display 修改(全部走 class)
+  assert.doesNotMatch(html, /\.style\.display/);
+  // v2.0.4:HTML 注释完整包住 doc-toc 外层 + wp-toc-floating-wrap + script
+  // 用户反馈:之前注释只包 wrap,doc-toc 容器没被注释包含
+  const startIdx = html.indexOf("<!-- WeavePage TOC: 结构");
+  const endIdx = html.indexOf("<!-- /WeavePage TOC: 结构");
+  assert.ok(startIdx >= 0 && endIdx > startIdx, "必须含结构起止注释\n输出:\n" + html);
+  const wrapped = html.slice(startIdx, endIdx);
+  assert.match(wrapped, /<div class="doc-toc"/, "doc-toc 外层 div 必须在注释之间\n输出:\n" + html);
+  assert.match(wrapped, /<div class="wp-toc-floating-wrap">/, "wp-toc-floating-wrap 必须在注释之间\n输出:\n" + html);
+  // script 在注释之后(避免 HTML 注释语法错误)
+  const scriptIdx = html.indexOf("<script>");
+  assert.ok(scriptIdx > endIdx, "script 必须在结构注释之后\n输出:\n" + html);
 });
 
 test("buildTocHtml 空 entries 也生成有效 HTML(无 h2 list 但 wrap 结构存在)", () => {
   const html = buildTocHtml([]);
-  // 不含 <style> 块
-  assert.doesNotMatch(html, /<style>/);
   // wrap 结构
-  assert.match(html, /<div id="wp-toc-floating-wrap"/);
-  assert.match(html, /<div id="wp-toc-floating-panel"/);
+  assert.match(html, /<div class="wp-toc-floating-wrap">/);
+  assert.match(html, /<div class="wp-toc-floating-panel"/);
   // h2-list 为空
-  assert.match(html, /<ul class="wp-toc-h2-list"[^>]*><\/ul>/);
+  assert.match(html, /<ul class="wp-toc-h2-list"><\/ul>/);
+  // 没有 submenu
+  assert.doesNotMatch(html, /class="wp-toc-h3-submenu"/);
   assert.match(html, /<script>/);
+});
+
+// buildTocStyleTag / removeTocStyleTag / hasTocStyleTag
+import { buildTocStyleTag, removeTocStyleTag, hasTocStyleTag } from "./tocGen";
+test("buildTocStyleTag 生成 <style id=\"wp-toc-style\"> 标签 + 注释标记", () => {
+  const tag = buildTocStyleTag();
+  assert.match(tag, /<!--\s*WeavePage TOC:\s*样式/);
+  // v2.1.0:允许 id 后面跟 data-weavepage-toc 属性(不强制 > 紧贴 id)
+  assert.match(tag, /<style id="wp-toc-style"/);
+  assert.match(tag, /<\/style>/);
+  assert.match(tag, /<!--\s*\/WeavePage TOC/);
+  assert.match(tag, /wp-toc-floating-wrap/);
+});
+test("removeTocStyleTag 从 head 字符串里移除 wp-toc-style 块", () => {
+  const head = "<meta><style id='wp-toc-style'>body{}</style><title>t</title>";
+  const out = removeTocStyleTag(head);
+  assert.doesNotMatch(out, /wp-toc-style/);
+  assert.match(out, /<meta>/);
+  assert.match(out, /<title>t<\/title>/);
+});
+test("hasTocStyleTag 检测 head 是否含 wp-toc-style", () => {
+  assert.equal(hasTocStyleTag("<style id='wp-toc-style'>x</style>"), true);
+  assert.equal(hasTocStyleTag("<style>x</style>"), false);
+  assert.equal(hasTocStyleTag(""), false);
+});
+
+// v2.1.0 Task 1:buildTocStyleTag 输出加 data-weavepage-toc 属性
+// 便于 design CSS 注入时找锚点(同时保留 id 不破坏 removeTocStyleTag / hasTocStyleTag)
+test("buildTocStyleTag 输出含 data-weavepage-toc 属性", () => {
+  const out = buildTocStyleTag();
+  // 新增:data-weavepage-toc 属性(便于 design CSS 注入锚点)
+  assert.match(out, /<style\s+id="wp-toc-style"\s+data-weavepage-toc>/);
+  // 保留:id 仍存在(不破坏 removeTocStyleTag / hasTocStyleTag)
+  assert.match(out, /<style\s+id="wp-toc-style"/);
 });
