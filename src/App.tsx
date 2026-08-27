@@ -821,6 +821,9 @@ ${sh.styles}
       // 第三十轮:用原始 bodyHtml 同步 docHtml(保留 WYSIWYG 元素,不经过 Tiptap schema strip)
       setDocHtml(doc.body.innerHTML || "<p></p>");
       setShell(newShell);
+      // P2 — spec §10.5:源码视图修改 <style data-weavepage-design="...">
+      // 后,DesignStrip 高亮应跟随新 ID(若 id 改了);若用户删了 style tag,高亮回到"默认"
+      setCurrentDesignId(parseDesignId(newShell.head));
       setRawFullDoc(fullHtml);
       // setContent 触发的 onUpdate 会把 isModified 置 true，这里按场景覆盖回正确状态
       setIsModified(markModified);
