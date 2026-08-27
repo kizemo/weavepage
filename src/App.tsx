@@ -31,6 +31,8 @@ import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
 import { AboutDialog } from "./components/AboutDialog";
 import { EditorContextMenu } from "./components/EditorContextMenu";
+// Goal 1 — 可视块选择浮层(hover 虚线 + selected 实线 + breadcrumb)
+import { SelectionOverlay } from "./components/SelectionOverlay";
 // v0.1.13 第三十轮:TOC 改为在 iframe 内部渲染(由 shell.head 的 TOC_CSS + doc-toc atom 的 TOC_SCRIPT 驱动)
 // 编辑器视图 / 预览视图 / 浏览器打开 三者完全 WYSIWYG 一致
 // 旧 React Portal TocFloating.tsx 已不再使用
@@ -57,6 +59,13 @@ import {
   applyLineHeight,
   applyParagraphSpacing,
 } from "./utils/paragraphSpacing";
+// Goal 1+2:块容器样式 helper — locateBlock / parseContainerStyle 用于反读 inline style
+import {
+  locateBlock,
+  parseContainerStyle,
+  type BlockIdentity,
+  type ContainerForm,
+} from "./utils/blockStyle";
 import {
   upsertShellHead,
   blockTypeToSelector,
@@ -166,6 +175,11 @@ function App() {
   // v2.1.0:文档设计 — 纯内存 state,不持久化到 localStorage / DocState
   // 设计 CSS 注入 shell.head(由 buildFullDoc 自动包含在保存的 HTML)
   const [currentDesignId, setCurrentDesignId] = useState<string | null>(null);
+  // Goal 1 — 可视块选择 state(selectedBlock 用于 iframe 重建后重定位,hoveredBlock 仅渲染浮层)
+  const [selectedBlock, setSelectedBlock] = useState<BlockIdentity | null>(null);
+  const [hoveredBlock, setHoveredBlock] = useState<{ tagName: string; nthOfType: number } | null>(null);
+  // Goal 2 — 容器组控件当前值(块选变化时反读 inline style 回填)
+  const [containerForm, setContainerForm] = useState<ContainerForm>({});
   // iframe ref:让 Ribbon 等组件能直接访问 iframe.contentDocument 执行 execCommand
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -315,6 +329,143 @@ function App() {
     setTocEnabled(hasDocTocInHtml(docHtml));
   }, [docHtml]);
 
+  // Goal 1 — iframe.contentDocument 事件: hover / click / dblclick / keydown
+  // 处理可视块选择 + 块选变化时反读 inline style 到 containerForm
+  // 注意:此 effect 只在 iframe 引用变化时挂载;iframe 重建时(切 activeDoc/改 shell)iframe.contentDocument 全换,
+  // 旧监听器会自然失效,新 effect 不需要 deps 中包含 selectedBlock 等。
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+
+    let lastMousedownTime = 0;
+
+    const onMouseOver = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (!(target instanceof HTMLElement)) return;
+      const block = findBlockAtClientPoint(iframe, e.clientX, e.clientY);
+      if (!block) {
+        setHoveredBlock(null);
+        return;
+      }
+      const parent = block.parentElement;
+      let nthOfType = 0;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter(
+          (c) => c.tagName === block.tagName
+        );
+        nthOfType = siblings.indexOf(block);
+      }
+      setHoveredBlock({ tagName: block.tagName.toLowerCase(), nthOfType });
+    };
+    const onMouseOut = (e: MouseEvent) => {
+      const related = e.relatedTarget as Node | null;
+      if (related && doc.contains(related)) return; // 还在 iframe 内,转 hover 新块
+      setHoveredBlock(null);
+    };
+
+    const onMouseDown = () => {
+      lastMousedownTime = Date.now();
+    };
+
+    // click vs dblclick (200ms 窗口)
+    const onClick = (e: MouseEvent) => {
+      const elapsed = Date.now() - lastMousedownTime;
+      if (elapsed > 200) return; // 不是单击(可能是双击第二下或文本拖选)
+      const target = e.target as Element | null;
+      if (!(target instanceof HTMLElement)) return;
+      const block = findBlockAtClientPoint(iframe, e.clientX, e.clientY);
+      if (!block) return;
+      const parent = block.parentElement;
+      let nthOfType = 0;
+      const textSample = (block.textContent ?? "").slice(0, 30);
+      if (parent) {
+        const siblings = Array.from(parent.children).filter(
+          (c) => c.tagName === block.tagName
+        );
+        nthOfType = siblings.indexOf(block);
+      }
+      setSelectedBlock({
+        tagName: block.tagName.toLowerCase(),
+        nthOfType,
+        textSample,
+      });
+      // 反读 inline style → containerForm(块选变化时回填)
+      const inlineStyle = block.getAttribute("style") ?? "";
+      setContainerForm(parseContainerStyle(inlineStyle));
+      // iframe.blur 让 Ribbon 接管 focus
+      iframe.contentWindow?.blur();
+    };
+
+    // dblclick 不拦,文本编辑正常进行
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedBlock(null);
+        setContainerForm({});
+        return;
+      }
+      if (e.key === "ArrowUp" && e.ctrlKey) {
+        e.preventDefault();
+        setSelectedBlock((prev) => {
+          if (!prev) return prev;
+          const el = locateBlock(doc, prev);
+          if (!el || !el.parentElement) return prev;
+          const parent = el.parentElement;
+          // 跳出同级同 tag:父元素的 nthOfType 在其同级内
+          const grand = parent.parentElement;
+          let nthOfType = 0;
+          if (grand) {
+            const siblings = Array.from(grand.children).filter(
+              (c) => c.tagName === parent.tagName
+            );
+            nthOfType = siblings.indexOf(parent);
+          }
+          return {
+            tagName: parent.tagName.toLowerCase(),
+            nthOfType: nthOfType >= 0 ? nthOfType : 0,
+            textSample: (parent.textContent ?? "").slice(0, 30),
+          };
+        });
+        return;
+      }
+      if (e.key === "ArrowDown" && e.ctrlKey) {
+        e.preventDefault();
+        setSelectedBlock((prev) => {
+          if (!prev) return prev;
+          const el = locateBlock(doc, prev);
+          if (!el) return prev;
+          const firstChild = Array.from(el.children).find(
+            (c) => c.tagName !== "BR"
+          ) as HTMLElement | undefined;
+          if (!firstChild || !firstChild.parentElement) return prev;
+          const siblings = Array.from(firstChild.parentElement.children).filter(
+            (c) => c.tagName === firstChild.tagName
+          );
+          return {
+            tagName: firstChild.tagName.toLowerCase(),
+            nthOfType: siblings.indexOf(firstChild),
+            textSample: (firstChild.textContent ?? "").slice(0, 30),
+          };
+        });
+        return;
+      }
+    };
+
+    doc.addEventListener("mouseover", onMouseOver);
+    doc.addEventListener("mouseout", onMouseOut);
+    doc.addEventListener("mousedown", onMouseDown);
+    doc.addEventListener("click", onClick);
+    doc.addEventListener("keydown", onKeyDown);
+    return () => {
+      doc.removeEventListener("mouseover", onMouseOver);
+      doc.removeEventListener("mouseout", onMouseOut);
+      doc.removeEventListener("mousedown", onMouseDown);
+      doc.removeEventListener("click", onClick);
+      doc.removeEventListener("keydown", onKeyDown);
+    };
+  }, [iframeRef]);
+
   // toggle:插入/删除 doc-toc atom,同时同步 shell.head 中的 TOC CSS
   // 第三十轮:CSS 集中在 <head>(便于 saved file 浏览器查看 + 编辑器 iframe WYSIWYG 一致)
   const onToggleToc = useCallback(() => {
@@ -457,6 +608,10 @@ function App() {
   const switchDoc = useCallback(
     (id: number) => {
       if (id === activeId || !editor) return;
+      // Goal 1 — 切 activeDoc 时清选中(iframe 重建,selectedBlock 不再有效)
+      setSelectedBlock(null);
+      setHoveredBlock(null);
+      setContainerForm({});
       const updated = snapshotActive();
       setDocs(updated);
       const target = updated.find((d) => d.id === id);
@@ -1016,6 +1171,10 @@ ${sh.styles}
         }
       }
       if (next === "source") {
+        // Goal 1 — 切到源码视图时清选中(可视化工具不适用源码视图)
+        setSelectedBlock(null);
+        setHoveredBlock(null);
+        setContainerForm({});
         // 源码视图显示完整页面（head 部分、CSS、JS 全部可见可编辑）
         // v2.0.1:formatHtml 只调整空白(块级缩进/换行),不修改任何字符。
         // 配合 sourceTextSnapshot,未编辑切回时直接跳过 syncFromSource,实现
@@ -1449,6 +1608,23 @@ const handleSpacingChange = useCallback(
                   const iframe = e.currentTarget as HTMLIFrameElement;
                   const doc = iframe.contentDocument;
                   if (!doc) return;
+                  // Goal 1 — iframe 重建后重定位 selectedBlock(⭐ 提升 / 改 shell 会触发重建)
+                  // closure 捕获的是上一次 state,即使后面 setSelectedBlock 已清,这里读到的还是原值
+                  if (selectedBlock) {
+                    const el = locateBlock(doc, selectedBlock);
+                    if (!el) {
+                      // 重建后原块不在了 → 清选中(罕见,用户重选)
+                      setSelectedBlock(null);
+                      setContainerForm({});
+                    } else if (
+                      containerForm &&
+                      Object.keys(containerForm).length === 0
+                    ) {
+                      // 重建后 containerForm 空 → 反读新 DOM 的 inline style
+                      const inlineStyle = el.getAttribute("style") ?? "";
+                      setContainerForm(parseContainerStyle(inlineStyle));
+                    }
+                  }
                   // 标记 isModified + 同步字数 + docHtml(用户编辑反馈)
                   doc.body.addEventListener("input", () => {
                     const html = doc.body.innerHTML;
@@ -1459,6 +1635,12 @@ const handleSpacingChange = useCallback(
                     setWordCount((doc.body.innerText || "").replace(/\s+/g, "").length);
                   });
                 }}
+              />
+              {/* Goal 1 — 可视块选择浮层(iframe 同级,fixed 定位) */}
+              <SelectionOverlay
+                iframeRef={iframeRef}
+                hoveredBlock={hoveredBlock}
+                selectedBlock={selectedBlock}
               />
               {/* v0.1.13 第三十轮:编辑器视图只显示 iframe 内 doc-toc atom(由 shell.head 中 TOC CSS 渲染),
                   不再额外渲染 TocFloating React Portal — 编辑器视图与浏览器打开完全一致(WYSIWYG)
