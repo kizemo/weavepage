@@ -33,6 +33,8 @@ import { AboutDialog } from "./components/AboutDialog";
 import { EditorContextMenu } from "./components/EditorContextMenu";
 // Goal 1 — 可视块选择浮层(hover 虚线 + selected 实线 + breadcrumb)
 import { SelectionOverlay } from "./components/SelectionOverlay";
+// Goal 3 — 关闭未保存弹窗(多 tab dirty 列表)
+import { UnsavedCloseDialog } from "./components/UnsavedCloseDialog";
 // v0.1.13 第三十轮:TOC 改为在 iframe 内部渲染(由 shell.head 的 TOC_CSS + doc-toc atom 的 TOC_SCRIPT 驱动)
 // 编辑器视图 / 预览视图 / 浏览器打开 三者完全 WYSIWYG 一致
 // 旧 React Portal TocFloating.tsx 已不再使用
@@ -186,6 +188,8 @@ function App() {
   const [containerForm, setContainerForm] = useState<ContainerForm>({});
   // Goal 2 — ⭐ 提升确认弹窗(原文 inline → head CSS tagName 规则)
   const [promoteConfirmOpen, setPromoteConfirmOpen] = useState<{ tagName: string; count: number } | null>(null);
+  // Goal 3 — 应用关闭未保存弹窗
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   // iframe ref:让 Ribbon 等组件能直接访问 iframe.contentDocument 执行 execCommand
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -1109,6 +1113,127 @@ ${sh.styles}
     [docs, activeId, editor, mode, sourceText, buildFullDoc, shell, updateActiveDoc, syncFromSource]
   );
 
+  // Goal 3 — saveDocById:按 id 保存指定 doc(不依赖 activeId)
+  // doSave 强依赖 activeId,关闭弹窗里要保存多个 dirty tab,必须独立函数
+  const saveDocById = useCallback(
+    async (id: number, path: string) => {
+      const doc = docs.find((d) => d.id === id);
+      if (!doc || !editor) return;
+      let content: string;
+      if (doc.kind === "text") {
+        content = doc.body;
+      } else if (doc.mode === "source") {
+        content = doc.sourceText;
+      } else {
+        content = buildFullDoc(doc.body, doc.shell);
+      }
+      await writeTextFile(path, content);
+      // 更新 docs 数组
+      setDocs((prev) =>
+        prev.map((d) =>
+          d.id === id ? { ...d, filePath: path, isModified: false } : d
+        )
+      );
+      // 同步当前显示(id === activeId 时)
+      if (id === activeId) {
+        setFilePath(path);
+        setIsModified(false);
+      }
+      // 保存到新路径时记入最近列表
+      if (path !== doc.filePath) {
+        pushRecent(path)
+          .then(setRecentPaths)
+          .catch((e) => console.warn("pushRecent 失败:", e));
+      }
+    },
+    [docs, activeId, editor, buildFullDoc]
+  );
+
+  // Goal 3 — handleSaveSelected:串行保存勾选的 dirty tabs
+  // 任一失败 → 留 dialog + 错误;全部成功 → 关闭应用
+  const handleSaveSelected = useCallback(
+    async (selectedIds: number[]): Promise<boolean> => {
+      for (const id of selectedIds) {
+        const doc = docs.find((d) => d.id === id);
+        if (!doc) continue;
+        let path = doc.filePath;
+        if (!path) {
+          // 无 filePath → 弹 save dialog
+          try {
+            const { save } = await import("@tauri-apps/plugin-dialog");
+            const ext = doc.kind === "text" ? "txt" : "html";
+            const selected = await save({
+              filters: [
+                {
+                  name: doc.kind === "text" ? "文本文件" : "HTML 文件",
+                  extensions: [ext],
+                },
+              ],
+            });
+            if (!selected) return false; // 用户取消 → 留在 dialog
+            path = selected.endsWith(`.${ext}`) ? selected : selected + `.${ext}`;
+          } catch (e) {
+            window.alert(`打开保存对话框失败: ${e}`);
+            return false;
+          }
+        }
+        try {
+          await saveDocById(id, path);
+        } catch (e) {
+          window.alert(`保存失败: ${e}\n文件: ${path}`);
+          return false;
+        }
+      }
+      // 全部成功 → 关闭应用
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().close();
+      } catch (e) {
+        console.error("关闭应用失败:", e);
+      }
+      return true;
+    },
+    [docs, saveDocById]
+  );
+
+  // Goal 3 — handleDontSave:所有 tab isModified=false(防重弹) + 关闭
+  // 关键:必须先清 isModified 再 close,否则 onCloseRequested 重触发又弹
+  const handleDontSave = useCallback(() => {
+    setDocs((prev) => prev.map((d) => ({ ...d, isModified: false })));
+    setCloseDialogOpen(false);
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().close();
+      } catch (e) {
+        console.error("关闭应用失败:", e);
+      }
+    })();
+  }, []);
+
+  const handleCancelClose = useCallback(() => {
+    setCloseDialogOpen(false);
+  }, []);
+
+  // Goal 3 — onCloseRequested:dirty 时弹 dialog,不 dirty 直接放行
+  // Tauri 2 的 onCloseRequested handler 必须 event.preventDefault() 才能阻止关闭
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      unlisten = await win.onCloseRequested(async (event) => {
+        const dirtyTabs = docs.filter((d) => d.isModified);
+        if (dirtyTabs.length === 0) return; // 不 prevent,允许关闭
+        event.preventDefault();
+        setCloseDialogOpen(true);
+      });
+    })();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [docs]);
+
   const saveFile = useCallback(async () => {
     if (!editor) return;
     try {
@@ -1806,6 +1931,22 @@ const handleSpacingChange = useCallback(
             </div>
           </div>
         </div>
+      )}
+
+      {/* Goal 3 — 应用关闭未保存弹窗 */}
+      {closeDialogOpen && (
+        <UnsavedCloseDialog
+          dirtyTabs={docs
+            .filter((d) => d.isModified)
+            .map((d) => ({
+              id: d.id,
+              filePath: d.filePath,
+              title: d.filePath ? d.filePath.split("\\").pop() ?? "(未命名)" : `(未命名 ${d.id})`,
+            }))}
+          onSaveSelected={handleSaveSelected}
+          onDontSave={handleDontSave}
+          onCancel={handleCancelClose}
+        />
       )}
     </div>
   );
