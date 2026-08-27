@@ -63,6 +63,10 @@ import {
 import {
   locateBlock,
   parseContainerStyle,
+  applyContainerStyle,
+  extractContainerStyle,
+  upsertBlockStyleRule,
+  type ContainerProp,
   type BlockIdentity,
   type ContainerForm,
 } from "./utils/blockStyle";
@@ -180,6 +184,8 @@ function App() {
   const [hoveredBlock, setHoveredBlock] = useState<{ tagName: string; nthOfType: number } | null>(null);
   // Goal 2 — 容器组控件当前值(块选变化时反读 inline style 回填)
   const [containerForm, setContainerForm] = useState<ContainerForm>({});
+  // Goal 2 — ⭐ 提升确认弹窗(原文 inline → head CSS tagName 规则)
+  const [promoteConfirmOpen, setPromoteConfirmOpen] = useState<{ tagName: string; count: number } | null>(null);
   // iframe ref:让 Ribbon 等组件能直接访问 iframe.contentDocument 执行 execCommand
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -524,6 +530,85 @@ function App() {
     },
     [shell, updateActiveDoc]
   );
+
+  // Goal 2 — 容器组控件改 inline style:跟 handleSpacingChange 同模式
+  // locateBlock → 应用 applyContainerStyle → el.setAttribute("style", ...)
+  // setDocHtml(body.innerHTML) → editorSrcDoc useMemo 重建 iframe
+  const setBlockStyle = useCallback(
+    (prop: ContainerProp, value: string) => {
+      if (!selectedBlock) return;
+      const iframe = iframeRef.current;
+      if (!iframe?.contentDocument) return;
+      const el = locateBlock(iframe.contentDocument, selectedBlock);
+      if (!el) return;
+      setContainerForm((prev) => ({ ...prev, [prop]: value }));
+      const style = applyContainerStyle(
+        el.getAttribute("style") ?? "",
+        prop,
+        value
+      );
+      el.setAttribute("style", style);
+      setIsModified(true);
+      updateActiveDoc({ isModified: true });
+      setDocHtml(iframe.contentDocument.body.innerHTML);
+    },
+    [selectedBlock, updateActiveDoc]
+  );
+
+  // Goal 2 — ⭐ 提升:把选中块的 inline style 抽成 head CSS tagName 规则,清原 inline
+  // N=1 → toast "无需提升";N>1 → 弹确认 modal
+  // 关键:清原 inline 后 head CSS 才会生效(inline CSS 优先级 > head tagName 规则)
+  const handlePromote = useCallback(() => {
+    if (!selectedBlock) return;
+    const iframe = iframeRef.current;
+    if (!iframe?.contentDocument) return;
+    const el = locateBlock(iframe.contentDocument, selectedBlock);
+    if (!el) return;
+    const tagName = el.tagName.toLowerCase();
+    const props = extractContainerStyle(el.getAttribute("style") ?? "");
+    if (Object.keys(props).length === 0) {
+      window.alert("该块没有可提升的样式");
+      return;
+    }
+    const count = iframe.contentDocument.body.querySelectorAll(tagName).length;
+    if (count <= 1) {
+      window.alert(`只有一个 ${tagName},无需提升`);
+      return;
+    }
+    setPromoteConfirmOpen({ tagName, count });
+  }, [selectedBlock]);
+
+  const confirmPromote = useCallback(() => {
+    if (!promoteConfirmOpen || !selectedBlock) return;
+    const iframe = iframeRef.current;
+    if (!iframe?.contentDocument) return;
+    const el = locateBlock(iframe.contentDocument, selectedBlock);
+    if (!el) return;
+    const tagName = el.tagName.toLowerCase();
+    const props = extractContainerStyle(el.getAttribute("style") ?? "");
+    if (Object.keys(props).length === 0) {
+      setPromoteConfirmOpen(null);
+      return;
+    }
+    const baseShell: DocShell = shell ?? {
+      doctype: "<!DOCTYPE html>",
+      head: "",
+      headCss: "",
+      bodyAttrs: "",
+      scripts: "",
+      styles: "",
+      baseHref: "",
+    };
+    const newHead = upsertBlockStyleRule(baseShell.head, tagName, props);
+    const newShell = { ...baseShell, head: newHead };
+    setShell(newShell);
+    // 关键:清原 inline,否则 head tagName 规则永远输
+    el.setAttribute("style", "");
+    setIsModified(true);
+    updateActiveDoc({ shell: newShell, isModified: true });
+    setDocHtml(iframe.contentDocument.body.innerHTML);
+    setPromoteConfirmOpen(null);
+  }, [promoteConfirmOpen, selectedBlock, shell, updateActiveDoc]);
 
   // v0.1.13 第二十六轮:TOC 由 TocFloating.tsx(React Portal)渲染,
   // 内部监听 editor.on("update") 自动重算 heading id + 写入 PM state。
@@ -1554,6 +1639,10 @@ const handleSpacingChange = useCallback(
         currentDesignId={currentDesignId}
         onApplyDesign={applyDesign}
         designDisabled={mode !== "edit" || isTextDoc}
+        selectedBlock={selectedBlock}
+        containerForm={containerForm}
+        onBlockStyleChange={setBlockStyle}
+        onPromoteBlock={handlePromote}
       />
 
       {/* 主区域：侧边栏 + 内容 */}
@@ -1699,6 +1788,25 @@ const handleSpacingChange = useCallback(
 
       {/* 关于弹窗 */}
       {showAbout && <AboutDialog currentVersion={appVersion || "0.0.0"} onClose={() => setShowAbout(false)} />}
+
+      {/* Goal 2 — ⭐ 提升确认 modal */}
+      {promoteConfirmOpen && (
+        <div className="modal-mask" onClick={() => setPromoteConfirmOpen(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>提升为默认</h3>
+            <p>
+              将把样式提升为本文档所有 <code>{promoteConfirmOpen.tagName}</code>{" "}
+              的默认(共 {promoteConfirmOpen.count} 个)。原 inline 会被清除。
+            </p>
+            <div className="modal-actions">
+              <button onClick={confirmPromote} className="modal-btn-primary">
+                确定
+              </button>
+              <button onClick={() => setPromoteConfirmOpen(null)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
