@@ -1,6 +1,7 @@
 // Goal 2 — 容器样式编辑 + ⭐ 提升按钮
 // 编辑 tab 末尾追加,7 个控件(背景/边框色/宽/样式/圆角/内边距) + ⭐ 提升
 // 无选中块时整组 disabled
+// 每个 select 控件前加 hint label(参照 RibbonHome 段落组的 ribbon-select-with-hint 模式)
 import { useCallback } from "react";
 import type {
   ContainerForm,
@@ -59,30 +60,42 @@ export function ContainerStyleGroup({
         title="边框色"
         label="边框"
       />
-      <SelectControl
-        value={containerForm.borderWidth ?? ""}
-        onChange={(v) => setProp("borderWidth")(v)}
-        options={BORDER_WIDTHS.map((w) => ({ label: w || "宽度", value: w }))}
-        title="边框宽度"
-      />
-      <SelectControl
-        value={containerForm.borderStyle ?? ""}
-        onChange={(v) => setProp("borderStyle")(v)}
-        options={BORDER_STYLES.map((s) => ({ label: s || "样式", value: s }))}
-        title="边框样式"
-      />
-      <SelectControl
-        value={containerForm.borderRadius ?? ""}
-        onChange={(v) => setProp("borderRadius")(v)}
-        options={BORDER_RADIUS.map((r) => ({ label: r || "圆角", value: r }))}
-        title="圆角"
-      />
-      <SelectControl
-        value={containerForm.padding ?? ""}
-        onChange={(v) => setProp("padding")(v)}
-        options={PADDINGS.map((p) => ({ label: p || "内边距", value: p }))}
-        title="内边距"
-      />
+      <span className="ribbon-select-with-hint" title="边框宽度">
+        <span className="ribbon-hint">边框宽</span>
+        <SelectControl
+          value={containerForm.borderWidth ?? ""}
+          onChange={(v) => setProp("borderWidth")(v)}
+          options={BORDER_WIDTHS.map((w) => ({ label: w, value: w }))}
+          title="边框宽度"
+        />
+      </span>
+      <span className="ribbon-select-with-hint" title="边框样式">
+        <span className="ribbon-hint">样式</span>
+        <SelectControl
+          value={containerForm.borderStyle ?? ""}
+          onChange={(v) => setProp("borderStyle")(v)}
+          options={BORDER_STYLES.map((s) => ({ label: s, value: s }))}
+          title="边框样式"
+        />
+      </span>
+      <span className="ribbon-select-with-hint" title="圆角">
+        <span className="ribbon-hint">圆角</span>
+        <SelectControl
+          value={containerForm.borderRadius ?? ""}
+          onChange={(v) => setProp("borderRadius")(v)}
+          options={BORDER_RADIUS.map((r) => ({ label: r, value: r }))}
+          title="圆角"
+        />
+      </span>
+      <span className="ribbon-select-with-hint" title="内边距">
+        <span className="ribbon-hint">内边距</span>
+        <SelectControl
+          value={containerForm.padding ?? ""}
+          onChange={(v) => setProp("padding")(v)}
+          options={PADDINGS.map((p) => ({ label: p, value: p }))}
+          title="内边距"
+        />
+      </span>
       <RibbonButton
         icon="⭐"
         label="提升"
