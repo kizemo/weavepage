@@ -60,6 +60,13 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 - **多标签页**：同时打开 HTML / CSS / JS / 文本文件，独立状态自由切换
 - **页式 / 全宽视图**、**主题三态**（浅色 / 深色 / 跟随系统），重启保持
 
+### 可视块选择与容器样式(v2.3.0)
+
+- **可视块选择**:在编辑区 hover 任意块元素 → 浅虚线 + tag 提示(灰色小角标);单击 → 蓝实线 + breadcrumb 角标;Esc 脱选;**Ctrl+↑/↓** 在父块 / 子块间逐层 drill
+- **容器样式编辑**:Ribbon 编辑 tab 末尾「容器」组,7 个控件:背景色 / 边框色 / 边框宽(0/1/2/4/8px)/ 边框样式(solid/dashed/dotted/none)/ 圆角(0/4/8/16px)/ 内边距(0/8/16/24/32px 单一值,四边一致)
+- **⭐ 提升为默认样式**:选中块后点 ⭐「提升」按钮,把当前块的 inline 样式抽成 head CSS `tagName { ... }` 规则,文档中所有同名标签共享样式。多于 1 个同标签时弹确认(N=1 时提示无需提升)
+- **关闭未保存弹窗**:点 X / Alt+F4 / Ctrl+Q 时若 dirty tab,弹出保存确认对话框(可勾选取消勾选个别 tab);无 dirty 直接退出
+
 ### 轻量可靠
 
 - 安装包自带 **WebView2 离线运行时** —— 全新电脑、无网络双击安装直接使用
@@ -77,7 +84,7 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ## 🚀 安装
 
-1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_2.2.0_x64-setup.exe`
+1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_2.3.0_x64-setup.exe`
 2. 双击安装（自动安装 WebView2 运行时，全程无需联网）
 3. 从开始菜单启动 **WeavePage**
 
@@ -86,14 +93,14 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 ### 🔐 校验
 
 ```
-# NSIS 安装包 (~209 MB)
-sha256: e5a72387da478b3264256ada7f80da09a13431ae0d495c8b0d829be33af28fa8
+# NSIS 安装包 (~254 MB)
+sha256: 21ed6e241267854f853f8e3355c2c56926064ee25b72e627ec9dc6a2796aadeb
 
 # NSIS 应用内升级包 (~5.4 MB,仅供 WeavePage 应用内升级使用)
-sha256: 2c3d3983526d9f60bbdf6155f032969ad646764596756ecbcccae189e37b1331
+sha256: 4cde9fc89a93b65fbf30caf87e7f24422f0a38aa63136dc1a40380319ece6378
 ```
 
-Windows 验证：`certutil -hashfile WeavePage_2.2.0_x64-setup.exe SHA256`
+Windows 验证：`certutil -hashfile WeavePage_2.3.0_x64-setup.exe SHA256`
 
 ## 📖 使用指南
 
@@ -103,15 +110,18 @@ Windows 验证：`certutil -hashfile WeavePage_2.2.0_x64-setup.exe SHA256`
 | 快速重开最近文档 | `文件 → 打开最近 ▶`（自动保存 10 个,一级子菜单带「清除」） |
 | 编辑内容 | 直接在编辑区输入，用功能区调整格式，所见即所得 |
 | 自定义文字/高亮颜色 | 功能区「文字颜色」/「高亮」弹窗 → 「更多颜色...」系统色盘；常用色自动入「最近使用」 |
+| 可视块选择 | 编辑区 **hover** 任意块 → 浅虚线 + tag;**单击** → 蓝实线 + breadcrumb;**Esc** 脱选;**Ctrl+↑/↓** drill 父/子 |
+| 改容器样式 | 先选中块 → Ribbon 编辑 tab 末尾「容器」组改背景/边框/圆角/内边距 |
+| 提升为默认样式 | 选中块 → 容器组 ⭐「提升」按钮(多同 tag 时弹确认) |
 | 查看真实效果 | 功能区「👁 网页预览」（或 F9），可直接在预览中改文字 |
 | 同步编辑到预览 | 预览中按 **F5** 刷新 |
 | 编辑整页源码 | `视图 → 源码视图`，head / CSS / JS 全部可改，Ctrl+S 保存 |
 | 编辑单个块源码 | 编辑区**右键任意块** → 右侧面板改 HTML → 应用 |
 | 编辑外联 CSS/JS | 左侧「外联资源」栏点击文件 → 新标签编辑 → Ctrl+S 写回 |
-| 多文件同时处理 | Ctrl+N 新建、Ctrl+O 打开、Ctrl+W 关闭标签 |
+| 多文件同时处理 | Ctrl+N 新建、Ctrl+O 打开、Ctrl+W 关闭标签、Ctrl+Q 退出应用 |
 | 插入表格/图片 | 「插入」选项卡：网格选择表格；图片按钮选本地图片 |
 
-**全部快捷键**：`Ctrl+N/O/S/Shift+S/W` 文件操作 · `Ctrl+Z/Y` 撤销重做 · `F5` 刷新预览 · `F9` 切换编辑/预览
+**全部快捷键**：`Ctrl+N/O/S/Shift+S/W/Q` 文件操作 · `Ctrl+Z/Y` 撤销重做 · `F5` 刷新预览 · `F9` 切换编辑/预览
 
 ## 🛠 Development Quickstart
 
@@ -152,6 +162,16 @@ pnpm release        # 打包安装程序到 release/ 目录
 - 演示文档见 [`assets/demo/demo.html`](assets/demo/demo.html)，下载后可直接用 WeavePage 打开体验
 
 ## 📋 变更日志
+
+### v2.3.0 — 2026-08-28
+- **新增 可视块选择(Goal 1)**:编辑器内 hover 任意块元素显示浅虚线 + tag 提示;单击选中后蓝实线 + breadcrumb;Esc 脱选;Ctrl+↑/↓ 在父块 / 子块间 drill
+- **新增 容器样式编辑(Goal 2)**:Ribbon 编辑 tab 末尾追加「容器」组(背景 / 边框色 / 边框宽 0/1/2/4/8 / 边框样式 solid/dashed/dotted/none / 圆角 0/4/8/16 / 内边距 0/8/16/24/32 单一值)+ ⭐「提升」按钮把选中块 inline 样式抽成 head CSS `<style id="weavepage-block-style">` 命名块的 `tagName { ... }` 规则,跨多同 tag 块共享(N>1 时弹确认,N=1 提示无需)。⭐ 提升后必须清原 inline(inline CSS 优先级 > head tagName 规则)
+- **新增 关闭未保存弹窗(Goal 3)**:应用关闭时若 dirty tab → 自定义 React 模态(复用 modal-mask 风格)列出 dirty tabs(checkbox 默认全选,可单独取消)+ 三按钮「保存选中」/「不保存」/「取消」
+- **重构 块选择架构**:iframe 内 srcdoc 注入 `<script>` 自渲染 hover/selected overlay(在 iframe.body 内 append),通过 `postMessage` 跟 outer 通信。规避 Tauri WebView2 + Windows 11 跨 frame 监听不可靠问题(经多轮真机测迭代修复)
+- **修复 退出 race condition**:`std::process::exit(0)`(Rust `exit_app` command)+ `isClosingRef` + iframe 内 Ctrl+Q 转发,确保 X / Alt+F4 / 菜单退出 / Ctrl+Q / Ctrl+W 全部路径生效
+- **修复 退出保存丢内容**:iframe.onLoad 的 input listener 同步 `body` 到 docs(之前只更新 `isModified`,`docs[i].body` 一直 stale,`saveDocById` 用 stale body 写盘 → 文件空)
+- **改进 容器组 UI**:select 控件前加 hint label(边框宽 / 样式 / 圆角 / 内边距),参照 RibbonHome 段落组的 `ribbon-select-with-hint` 模式
+- **拆分 菜单"关闭标签" / "退出"**:符合主流编辑器惯例 — Ctrl+W 关 tab,Ctrl+Q / 文件菜单"退出"关应用
 
 ### v2.2.0 — 2026-08-27
 - **新增 设计顶级 Ribbon Tab**:把 v2.1.0 设计按钮从 ribbon「编辑」tab 内的 dropdown 浮层提升为顶级 tab(与「编辑」「插入」平级)。菜单栏顺序:文件 / 编辑 / 插入 / 设计 / 视图 / 帮助
