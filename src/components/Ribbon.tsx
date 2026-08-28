@@ -2,12 +2,15 @@
 // - 字体/段落/样式/链接由 RibbonHome 用 iframe.contentDocument.execCommand 实现
 // - 表格/插图/水平线/目录由 RibbonInsert 用 iframe DOM + execCommand 实现
 // v2.2.0:增加 activeTab === "design" 分支,渲染 DesignStrip(9 张缩略图横排)
+// v2.3.0:Goal 2 — 编辑 tab 末尾追加 ContainerStyleGroup(容器样式 + ⭐ 提升)
 
 import type { RefObject } from "react";
 import { RibbonHome } from "./RibbonHome";
 import { RibbonInsert } from "./RibbonInsert";
 import { DesignStrip } from "./DesignStrip";
+import { ContainerStyleGroup } from "./ContainerStyleGroup";
 import type { RibbonTab } from "./MenuBar";
+import type { ContainerProp, ContainerForm, BlockIdentity } from "../utils/blockStyle";
 
 export type ViewMode = "page" | "wide";
 export type ThemeMode = "system" | "light" | "dark";
@@ -34,6 +37,11 @@ interface RibbonProps {
   currentDesignId: string | null;
   onApplyDesign: (id: string | null) => void;
   designDisabled: boolean;
+  // v2.3.0:Goal 2 — 容器样式编辑
+  selectedBlock: BlockIdentity | null;
+  containerForm: ContainerForm;
+  onBlockStyleChange: (prop: ContainerProp, value: string) => void;
+  onPromoteBlock: () => void;
 }
 
 export function Ribbon(props: RibbonProps) {
@@ -42,15 +50,23 @@ export function Ribbon(props: RibbonProps) {
       <div className={`ribbon-body ${props.collapsed ? "collapsed" : ""}`}>
         <div className={`ribbon-tab-content ${props.disabled ? "disabled" : ""}`}>
           {props.activeTab === "edit" && (
-            <RibbonHome
-              iframeRef={props.iframeRef}
-              onLink={props.onLink}
-              recentTextColors={props.recentTextColors}
-              recentHighlightColors={props.recentHighlightColors}
-              onColorUsed={props.onColorUsed}
-              onSpacingChange={props.onSpacingChange}
-              onPageBgChange={props.onPageBgChange}
-            />
+            <>
+              <RibbonHome
+                iframeRef={props.iframeRef}
+                onLink={props.onLink}
+                recentTextColors={props.recentTextColors}
+                recentHighlightColors={props.recentHighlightColors}
+                onColorUsed={props.onColorUsed}
+                onSpacingChange={props.onSpacingChange}
+                onPageBgChange={props.onPageBgChange}
+              />
+              <ContainerStyleGroup
+                selectedBlock={props.selectedBlock}
+                containerForm={props.containerForm}
+                onChange={props.onBlockStyleChange}
+                onPromote={props.onPromoteBlock}
+              />
+            </>
           )}
           {props.activeTab === "insert" && (
             <RibbonInsert

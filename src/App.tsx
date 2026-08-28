@@ -31,6 +31,11 @@ import type { ResourceRef } from "./components/Sidebar";
 import type { ViewMode, ThemeMode } from "./components/Ribbon";
 import { AboutDialog } from "./components/AboutDialog";
 import { EditorContextMenu } from "./components/EditorContextMenu";
+// Goal 1+2 — overlay 由 iframe 内 blockSelectorScript 自渲染,不需要外层 React portal
+// 保留旧的 SelectionOverlay 组件(暂不删,作为 fallback)
+// import { SelectionOverlay } from "./components/SelectionOverlay";
+// Goal 3 — 关闭未保存弹窗(多 tab dirty 列表)
+import { UnsavedCloseDialog } from "./components/UnsavedCloseDialog";
 // v0.1.13 第三十轮:TOC 改为在 iframe 内部渲染(由 shell.head 的 TOC_CSS + doc-toc atom 的 TOC_SCRIPT 驱动)
 // 编辑器视图 / 预览视图 / 浏览器打开 三者完全 WYSIWYG 一致
 // 旧 React Portal TocFloating.tsx 已不再使用
@@ -57,6 +62,17 @@ import {
   applyLineHeight,
   applyParagraphSpacing,
 } from "./utils/paragraphSpacing";
+// Goal 1+2:块容器样式 helper — locateBlock / parseContainerStyle 用于反读 inline style
+import {
+  locateBlock,
+  parseContainerStyle,
+  upsertBlockStyleRule,
+  type ContainerProp,
+  type BlockIdentity,
+  type ContainerForm,
+} from "./utils/blockStyle";
+// iframe 内 block selector script(在 srcdoc 内执行,跨 frame 监听问题消除)
+import { blockSelectorScript } from "./utils/blockSelectorScript";
 import {
   upsertShellHead,
   blockTypeToSelector,
@@ -122,6 +138,11 @@ function App() {
   const [docs, setDocs] = useState<DocState[]>([emptyDoc(1)]);
   const [activeId, setActiveId] = useState(1);
   const idRef = useRef(2);
+  // Bug fix #2:applyDoc 期间跳过 editor.onUpdate 的 isModified=true(程序化 setContent 不算 dirty)
+  const isApplyingDoc = useRef(false);
+  // Bug fix #1(退出流程):handleSaveSelected/handleDontSave 设置此 ref,
+  // onCloseRequested handler 检查后跳过,避免 React state batch 未 apply 时重弹 dialog
+  const isClosingRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_KEY) as ViewMode) || "page"
   );
@@ -166,6 +187,15 @@ function App() {
   // v2.1.0:文档设计 — 纯内存 state,不持久化到 localStorage / DocState
   // 设计 CSS 注入 shell.head(由 buildFullDoc 自动包含在保存的 HTML)
   const [currentDesignId, setCurrentDesignId] = useState<string | null>(null);
+  // Goal 1 — 可视块选择 state(selectedBlock 用于 Ribbon 容器组 + iframe 重建后重定位)
+  // iframe 内 overlay 由 blockSelectorScript 自渲染,outer 不维护 hoveredBlock
+  const [selectedBlock, setSelectedBlock] = useState<BlockIdentity | null>(null);
+  // Goal 2 — 容器组控件当前值(块选变化时反读 inline style 回填)
+  const [containerForm, setContainerForm] = useState<ContainerForm>({});
+  // Goal 2 — ⭐ 提升确认弹窗(原文 inline → head CSS tagName 规则)
+  const [promoteConfirmOpen, setPromoteConfirmOpen] = useState<{ tagName: string; count: number } | null>(null);
+  // Goal 3 — 应用关闭未保存弹窗
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   // iframe ref:让 Ribbon 等组件能直接访问 iframe.contentDocument 执行 execCommand
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -298,6 +328,8 @@ function App() {
     content: "<p></p>",
     editorProps: { attributes: { class: "editor-body" } },
     onUpdate: ({ editor }) => {
+      // Bug fix #2:applyDoc 期间程序化 setContent 会触发 onUpdate,不应视为 dirty
+      if (isApplyingDoc.current) return;
       setIsModified(true);
       updateActiveDoc({ isModified: true });
       setWordCount(editor.getText().replace(/\s+/g, "").length);
@@ -314,6 +346,77 @@ function App() {
   useEffect(() => {
     setTocEnabled(hasDocTocInHtml(docHtml));
   }, [docHtml]);
+
+  // Goal 1+2 — 监听 iframe.contentWindow postMessage
+  // iframe 内 blockSelectorScript 通过 postMessage 通知 outer 当前选中的块 / doc 内容变化 / ⭐ 提升结果
+  // Bug fix #6:wp-exit-app 转发 Ctrl+Q 到 handleExitAppRef(避免 TDZ + stale closure)
+  const handleExitAppRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const msg = e.data || {};
+      // iframe 内 Ctrl+Q 触发 → outer 走 handleExitApp(走 dirty 检测)
+      if (msg.type === "wp-exit-app") {
+        handleExitAppRef.current();
+        return;
+      }
+      if (msg.type === "wp-block-selected") {
+        // iframe 内选中变化 → outer 更新 selectedBlock + containerForm
+        const identity = msg.identity as BlockIdentity | null;
+        setSelectedBlock(identity);
+        if (identity) {
+          // 反读 inline style(从 iframe.contentDocument)
+          const iframe = iframeRef.current;
+          const doc = iframe?.contentDocument;
+          const el = doc ? locateBlock(doc, identity) : null;
+          if (el) {
+            setContainerForm(parseContainerStyle(el.getAttribute("style") ?? ""));
+          }
+        } else {
+          setContainerForm({});
+        }
+        return;
+      }
+      if (msg.type === "wp-doc-updated") {
+        // iframe 内 inline style 修改 → 同步到 outer docHtml
+        if (typeof msg.bodyHtml === "string") {
+          setDocHtml(msg.bodyHtml);
+          setIsModified(true);
+          updateActiveDoc({ isModified: true });
+        }
+        return;
+      }
+      if (msg.type === "wp-promote-result") {
+        // iframe 内 script 抽样式 + 发送结果,outer 负责 upsertBlockStyleRule 到 head + 清 inline
+        const { tagName, props, styleAttr } = msg;
+        if (!tagName || !props || Object.keys(props).length === 0) return;
+        const baseShell: DocShell = shell ?? {
+          doctype: "<!DOCTYPE html>",
+          head: "",
+          headCss: "",
+          bodyAttrs: "",
+          scripts: "",
+          styles: "",
+          baseHref: "",
+        };
+        const newHead = upsertBlockStyleRule(baseShell.head, tagName, props);
+        const newShell = { ...baseShell, head: newHead };
+        setShell(newShell);
+        // 通知 iframe:清原 inline + reload
+        try {
+          iframeRef.current?.contentWindow?.postMessage({
+            type: "wp-clear-inline",
+            tagName: tagName,
+            styleAttr: styleAttr,
+          }, "*");
+        } catch {}
+        setIsModified(true);
+        updateActiveDoc({ shell: newShell, isModified: true });
+        return;
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [shell, updateActiveDoc]);
 
   // toggle:插入/删除 doc-toc atom,同时同步 shell.head 中的 TOC CSS
   // 第三十轮:CSS 集中在 <head>(便于 saved file 浏览器查看 + 编辑器 iframe WYSIWYG 一致)
@@ -374,6 +477,44 @@ function App() {
     [shell, updateActiveDoc]
   );
 
+  // Goal 2 — 容器组控件改 inline style:跟 handleSpacingChange 同模式
+  // locateBlock → 应用 applyContainerStyle → el.setAttribute("style", ...)
+  // setDocHtml(body.innerHTML) → editorSrcDoc useMemo 重建 iframe
+  // Goal 2 — setBlockStyle 通过 postMessage 让 iframe 内 script 改 inline style
+  // Bug fix #3:不读 outer selectedBlock 早 return(Race condition — React state 异步 batch 时可能 stale)
+  // iframe 内 script 自维护 selectedBlock 引用,收到 wp-set-style 后用它改 inline
+  const setBlockStyle = useCallback(
+    (prop: ContainerProp, value: string) => {
+      setContainerForm((prev) => ({ ...prev, [prop]: value }));
+      try {
+        iframeRef.current?.contentWindow?.postMessage({
+          type: "wp-set-style",
+          prop,
+          value,
+        }, "*");
+      } catch {}
+    },
+    []
+  );
+
+  // Goal 2 — ⭐ 提升:postMessage 让 iframe 内 script 抽样式
+  // iframe 内 script 返 wp-promote-result(tagName + props),outer 负责 upsertBlockStyleRule + 清 inline
+  // N=1 → 直接提示无需提升;N>1 → 弹确认 modal
+  const handlePromote = useCallback(() => {
+    if (!selectedBlock) return;
+    try {
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: "wp-promote" },
+        "*"
+      );
+    } catch {}
+  }, [selectedBlock]);
+
+  const confirmPromote = useCallback(() => {
+    // wp-promote-result 已在 window.message 监听里处理(upsertBlockStyleRule + wp-clear-inline)
+    setPromoteConfirmOpen(null);
+  }, []);
+
   // v0.1.13 第二十六轮:TOC 由 TocFloating.tsx(React Portal)渲染,
   // 内部监听 editor.on("update") 自动重算 heading id + 写入 PM state。
   // 这里不再需要 regen scheduling / tocEnabled state / onToggleToc。
@@ -404,6 +545,8 @@ function App() {
       setBlockPanelElement(null);
       setFilePath(doc.filePath);
       setIsModified(doc.isModified);
+      // Bug fix #2:applyDoc 期间屏蔽 editor.onUpdate 的 isModified=true
+      isApplyingDoc.current = true;
       if (doc.kind === "html") {
         // 第三十轮:用原始 doc.body 同步 docHtml(保留 <script>/<style>/<button> 等 WYSIWYG 元素)
         // 不要用 editor.getHTML() — Tiptap schema 会 strip 未知元素,破坏 WYSIWYG
@@ -439,6 +582,8 @@ function App() {
         setCurrentDesignId(parseDesignId(doc.shell?.head ?? ""));
         // editor 仍 setContent(保留给将来 stage 5 切换,但不影响 docHtml)
         editor?.commands.setContent(doc.body || "<p></p>");
+        // Bug fix #2:setContent 同步触发 onUpdate,此时 isApplyingDoc=true 已屏蔽 isModified
+        isApplyingDoc.current = false;
         setMode(doc.mode);
         setSourceText(doc.sourceText);
         setRawFullDoc(doc.rawFullDoc);
@@ -457,6 +602,16 @@ function App() {
   const switchDoc = useCallback(
     (id: number) => {
       if (id === activeId || !editor) return;
+      // Goal 1 — 切 activeDoc 时清选中(iframe 重建,selectedBlock 不再有效)
+      setSelectedBlock(null);
+      // 通知 iframe 清掉 overlay(iframe 重建后 script 会重新执行)
+      try {
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: "wp-clear-selected" },
+          "*"
+        );
+      } catch {}
+      setContainerForm({});
       const updated = snapshotActive();
       setDocs(updated);
       const target = updated.find((d) => d.id === id);
@@ -639,6 +794,9 @@ ${bodyStyles}
   // ---- 用内容 + 外壳重建完整 HTML ----
   const buildFullDoc = useCallback(
     (bodyHtml: string, sh: DocShell | null, editable: boolean = false): string => {
+      // Goal 1+2 — editable 模式注入 block selector script(iframe 内自渲染 + postMessage)
+      // 完全在 iframe 内执行,跨 frame 监听问题消除
+      const blockSelector = editable ? `<script>${blockSelectorScript()}</script>` : "";
       if (sh) {
         const base = sh.baseHref ? `<base href="${encodeURI(sh.baseHref)}">` : "";
         // v0.1.13 第三十轮:editable 模式下 body 加 contenteditable=true,iframe 内可直接编辑
@@ -650,6 +808,7 @@ ${bodyStyles}
 ${bodyHtml}
 ${sh.scripts}
 ${sh.styles}
+${blockSelector}
 </body>
 </html>`;
       }
@@ -663,7 +822,7 @@ ${sh.styles}
 <title>${title}</title>
 <style>body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.7;max-width:794px;margin:0 auto;padding:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px}blockquote{border-left:3px solid #ccc;margin:0.5em 0;padding-left:1em;color:#666}pre{background:#f0f0f0;padding:1em;border-radius:6px;overflow-x:auto}code{background:#f0f0f0;padding:0.2em 0.4em;border-radius:3px}img{max-width:100%;height:auto}</style>
 </head>
-<body${bodyEditable}>${bodyHtml}</body>
+<body${bodyEditable}>${bodyHtml}${blockSelector}</body>
 </html>`;
     },
     [filePath]
@@ -821,6 +980,9 @@ ${sh.styles}
       // 第三十轮:用原始 bodyHtml 同步 docHtml(保留 WYSIWYG 元素,不经过 Tiptap schema strip)
       setDocHtml(doc.body.innerHTML || "<p></p>");
       setShell(newShell);
+      // P2 — spec §10.5:源码视图修改 <style data-weavepage-design="...">
+      // 后,DesignStrip 高亮应跟随新 ID(若 id 改了);若用户删了 style tag,高亮回到"默认"
+      setCurrentDesignId(parseDesignId(newShell.head));
       setRawFullDoc(fullHtml);
       // setContent 触发的 onUpdate 会把 isModified 置 true，这里按场景覆盖回正确状态
       setIsModified(markModified);
@@ -865,6 +1027,167 @@ ${sh.styles}
     },
     [docs, activeId, editor, mode, sourceText, buildFullDoc, shell, updateActiveDoc, syncFromSource]
   );
+
+  // Goal 3 — saveDocById:按 id 保存指定 doc(不依赖 activeId)
+  // doSave 强依赖 activeId,关闭弹窗里要保存多个 dirty tab,必须独立函数
+  const saveDocById = useCallback(
+    async (id: number, path: string) => {
+      const doc = docs.find((d) => d.id === id);
+      if (!doc || !editor) return;
+      let content: string;
+      if (doc.kind === "text") {
+        content = doc.body;
+      } else if (doc.mode === "source") {
+        content = doc.sourceText;
+      } else {
+        content = buildFullDoc(doc.body, doc.shell);
+      }
+      await writeTextFile(path, content);
+      // 更新 docs 数组
+      setDocs((prev) =>
+        prev.map((d) =>
+          d.id === id ? { ...d, filePath: path, isModified: false } : d
+        )
+      );
+      // 同步当前显示(id === activeId 时)
+      if (id === activeId) {
+        setFilePath(path);
+        setIsModified(false);
+      }
+      // 保存到新路径时记入最近列表
+      if (path !== doc.filePath) {
+        pushRecent(path)
+          .then(setRecentPaths)
+          .catch((e) => console.warn("pushRecent 失败:", e));
+      }
+    },
+    [docs, activeId, editor, buildFullDoc]
+  );
+
+  // Goal 3 — handleSaveSelected:串行保存勾选的 dirty tabs
+  // Bug fix #1(根因):通过 invoke('exit_app') 触发 Rust 端 exit_app command → window.destroy()
+  // 跳过 React state async batch + onCloseRequested handler race,确保退出
+  const handleSaveSelected = useCallback(
+    async (selectedIds: number[]): Promise<boolean> => {
+      isClosingRef.current = true;
+      for (const id of selectedIds) {
+        const doc = docs.find((d) => d.id === id);
+        if (!doc) continue;
+        let path = doc.filePath;
+        if (!path) {
+          try {
+            const { save } = await import("@tauri-apps/plugin-dialog");
+            const ext = doc.kind === "text" ? "txt" : "html";
+            const selected = await save({
+              filters: [
+                {
+                  name: doc.kind === "text" ? "文本文件" : "HTML 文件",
+                  extensions: [ext],
+                },
+              ],
+            });
+            if (!selected) {
+              isClosingRef.current = false;
+              return false;
+            }
+            path = selected.endsWith(`.${ext}`) ? selected : selected + `.${ext}`;
+          } catch (e) {
+            window.alert(`打开保存对话框失败: ${e}`);
+            isClosingRef.current = false;
+            return false;
+          }
+        }
+        try {
+          await saveDocById(id, path);
+        } catch (e) {
+          window.alert(`保存失败: ${e}\n文件: ${path}`);
+          isClosingRef.current = false;
+          return false;
+        }
+      }
+      // 全部成功 → Rust 端 destroy
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("exit_app");
+      return true;
+    },
+    [docs, saveDocById]
+  );
+
+  // Goal 3 — handleDontSave:invoke('exit_app') 触发 Rust 端 destroy
+  const handleDontSave = useCallback(() => {
+    isClosingRef.current = true;
+    setDocs((prev) => prev.map((d) => ({ ...d, isModified: false })));
+    setCloseDialogOpen(false);
+    (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("exit_app");
+      } catch (e) {
+        console.error("退出应用失败:", e);
+      }
+    })();
+  }, []);
+
+  // 文件菜单"退出"按钮 + Ctrl+Q:关闭应用
+  // Bug fix #1.3:之前直接 invoke('exit_app') 跳过 dirty 检测,导致编辑后文件丢
+  // 现在跟 X / Alt+F4 一样:有 dirty 弹 dialog 处理;无 dirty 才直接 invoke
+  const handleExitApp = useCallback(() => {
+    const dirtyTabs = docs.filter((d) => d.isModified);
+    if (dirtyTabs.length === 0) {
+      // 无 dirty → 直接退出
+      (async () => {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("exit_app");
+        } catch (e) {
+          console.error("退出应用失败:", e);
+        }
+      })();
+      return;
+    }
+    // 有 dirty → 弹 dialog,让用户选保存/不保存/取消
+    setCloseDialogOpen(true);
+  }, [docs]);
+  // Bug fix #6:同步 ref 给 onMessage 闭包(避免 TDZ),Ctrl+Q iframe 内触发也能调到
+  handleExitAppRef.current = handleExitApp;
+
+  const handleCancelClose = useCallback(() => {
+    setCloseDialogOpen(false);
+  }, []);
+
+  // Goal 3 — onCloseRequested:总是 preventDefault,然后决定走 dialog 还是直接 invoke exit
+  // Bug fix #5(根因):之前 `if (dirtyTabs.length === 0) return` 不调 preventDefault,
+  // 但 Tauri WebView2 + Win11 在某些版本默认阻止关闭,导致即便无 dirty 也关不掉
+  // 现在总是 preventDefault + 显式 invoke('exit_app')(Rust std::process::exit(0) 立即终止)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      unlisten = await win.onCloseRequested(async (event) => {
+        // 总是先 preventDefault,防止 Tauri 默认行为不一致
+        event.preventDefault();
+        // handleSaveSelected/handleDontSave/handleExitApp 已设 isClosingRef → 跳过
+        if (isClosingRef.current) return;
+        const dirtyTabs = docs.filter((d) => d.isModified);
+        if (dirtyTabs.length === 0) {
+          // 无 dirty → 显式退出
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            await invoke("exit_app");
+          } catch (e) {
+            console.error("退出应用失败:", e);
+          }
+          return;
+        }
+        // 有 dirty → 弹 dialog
+        setCloseDialogOpen(true);
+      });
+    })();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [docs]);
 
   const saveFile = useCallback(async () => {
     if (!editor) return;
@@ -1013,6 +1336,15 @@ ${sh.styles}
         }
       }
       if (next === "source") {
+        // Goal 1 — 切到源码视图时清选中(可视化工具不适用源码视图)
+        setSelectedBlock(null);
+        try {
+          iframeRef.current?.contentWindow?.postMessage(
+            { type: "wp-clear-selected" },
+            "*"
+          );
+        } catch {}
+        setContainerForm({});
         // 源码视图显示完整页面（head 部分、CSS、JS 全部可见可编辑）
         // v2.0.1:formatHtml 只调整空白(块级缩进/换行),不修改任何字符。
         // 配合 sourceTextSnapshot,未编辑切回时直接跳过 syncFromSource,实现
@@ -1038,14 +1370,28 @@ const findBlockAtClientPoint = (
   const rect = iframe.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;
-  let el: Element | null = doc.elementFromPoint(x, y);
-  if (!(el instanceof HTMLElement)) return null;
+  const el: HTMLElement | null = doc.elementFromPoint(x, y) as HTMLElement | null;
+  if (!el) return null;
   // 向上找到最近的 block 元素
+  // 跨 frame: view 是 iframe.contentWindow(同一个 defaultView) — 但调用 getComputedStyle
+  // 在 sandbox="allow-same-origin" 下应允许;为安全加 try/catch + 退化
+  const view = doc.defaultView;
+  if (!view || typeof view.getComputedStyle !== "function") return el;
   let cur: HTMLElement | null = el;
-  while (cur && cur !== doc.body) {
-    const display = window.getComputedStyle(cur).display;
-    if (!display.startsWith("inline")) return cur;
-    cur = cur.parentElement;
+  try {
+    while (cur && cur !== doc.body) {
+      const display = view.getComputedStyle(cur).display;
+      // block 类: block, flex, grid, table, list-item, table-row 等都算块
+      // 不只是 !startsWith('inline')(因为 "" 也会通过)
+      if (display && display !== "inline" && display !== "inline-block" && display !== "inline-flex" && display !== "inline-table") {
+        return cur;
+      }
+      cur = cur.parentElement;
+    }
+  } catch (e) {
+    // 跨 frame getComputedStyle 抛错时退化到 elementFromPoint 的结果
+    console.warn('[Goal1] findBlockAtClientPoint getComputedStyle error:', e);
+    return el;
   }
   return el;
 };
@@ -1294,6 +1640,13 @@ const handleSpacingChange = useCallback(
         e.preventDefault();
         refs.current.close();
       }
+      // v2.3.0: Ctrl+Q 退出整个应用
+      if (mod && !e.shiftKey && e.key.toLowerCase() === "q") {
+        e.preventDefault();
+        import("@tauri-apps/api/core").then(({ invoke }) =>
+          invoke("exit_app").catch((err) => console.error("退出应用失败:", err))
+        );
+      }
       // v0.2.0:F5/F9 预览快捷键已移除(预览视图不再存在)
     };
     window.addEventListener("keydown", handler);
@@ -1353,7 +1706,8 @@ const handleSpacingChange = useCallback(
         onSave={saveFile}
         onSaveAs={saveAsFile}
         onExportPage={exportPage}
-        onClose={() => closeDoc(activeId)}
+        onCloseTab={() => closeDoc(activeId)}
+        onExitApp={handleExitApp}
         recent={recentPaths}
         onOpenRecent={openRecent}
         onClearRecent={handleClearRecent}
@@ -1392,6 +1746,10 @@ const handleSpacingChange = useCallback(
         currentDesignId={currentDesignId}
         onApplyDesign={applyDesign}
         designDisabled={mode !== "edit" || isTextDoc}
+        selectedBlock={selectedBlock}
+        containerForm={containerForm}
+        onBlockStyleChange={setBlockStyle}
+        onPromoteBlock={handlePromote}
       />
 
       {/* 主区域：侧边栏 + 内容 */}
@@ -1443,20 +1801,36 @@ const handleSpacingChange = useCallback(
                 sandbox="allow-same-origin allow-scripts allow-forms"
                 onLoad={(e) => {
                   // iframe load 完后绑定 onInput 监听(避免重建 iframe 丢失 focus)
+                  // Goal 1+2 — 块选择现在由 srcdoc 注入的 blockSelectorScript 处理(iframe 内自渲染 + postMessage),
+                  // 此处不再需要跨 frame 监听,跨 frame 监听在 Tauri WebView2 行为不可靠。
                   const iframe = e.currentTarget as HTMLIFrameElement;
                   const doc = iframe.contentDocument;
                   if (!doc) return;
+                  // iframe 重建后(selectedBlock 还在):通知 iframe 内 script 重新选中该块
+                  if (selectedBlock) {
+                    try {
+                      iframe.contentWindow?.postMessage({
+                        type: "wp-reapply-selected",
+                        identity: selectedBlock,
+                      }, "*");
+                    } catch {}
+                  }
                   // 标记 isModified + 同步字数 + docHtml(用户编辑反馈)
                   doc.body.addEventListener("input", () => {
                     const html = doc.body.innerHTML;
                     setDocHtml(html);
                     setIsModified(true);
-                    updateActiveDoc({ isModified: true });
+                    // Bug fix #1.6:同步 body 到 active doc,saveDocById 用 doc.body 写盘时拿到最新值
+                    // 之前只更新 isModified,docs[i].body 一直是 applyDoc 时的旧值,
+                    // 退出保存时写空文件/旧值 → "保存没生效"
+                    updateActiveDoc({ isModified: true, body: html });
                     // 字数统计:用 doc.body.innerText(更准确,跳过 style/script)
                     setWordCount((doc.body.innerText || "").replace(/\s+/g, "").length);
                   });
                 }}
               />
+              {/* Goal 1+2 — overlay 由 iframe 内 blockSelectorScript 自渲染,React portal 删了 */}
+              {/* SelectionOverlay 组件已删除,跨 frame 监听改 iframe 内 script */}
               {/* v0.1.13 第三十轮:编辑器视图只显示 iframe 内 doc-toc atom(由 shell.head 中 TOC CSS 渲染),
                   不再额外渲染 TocFloating React Portal — 编辑器视图与浏览器打开完全一致(WYSIWYG)
                   doc-toc atom 在 iframe 内由 TOC_SCRIPT 处理 hover/click,与 preview iframe 一致 */}
@@ -1514,6 +1888,41 @@ const handleSpacingChange = useCallback(
 
       {/* 关于弹窗 */}
       {showAbout && <AboutDialog currentVersion={appVersion || "0.0.0"} onClose={() => setShowAbout(false)} />}
+
+      {/* Goal 2 — ⭐ 提升确认 modal */}
+      {promoteConfirmOpen && (
+        <div className="modal-mask" onClick={() => setPromoteConfirmOpen(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>提升为默认</h3>
+            <p>
+              将把样式提升为本文档所有 <code>{promoteConfirmOpen.tagName}</code>{" "}
+              的默认(共 {promoteConfirmOpen.count} 个)。原 inline 会被清除。
+            </p>
+            <div className="modal-actions">
+              <button onClick={confirmPromote} className="modal-btn-primary">
+                确定
+              </button>
+              <button onClick={() => setPromoteConfirmOpen(null)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Goal 3 — 应用关闭未保存弹窗 */}
+      {closeDialogOpen && (
+        <UnsavedCloseDialog
+          dirtyTabs={docs
+            .filter((d) => d.isModified)
+            .map((d) => ({
+              id: d.id,
+              filePath: d.filePath,
+              title: d.filePath ? d.filePath.split("\\").pop() ?? "(未命名)" : `(未命名 ${d.id})`,
+            }))}
+          onSaveSelected={handleSaveSelected}
+          onDontSave={handleDontSave}
+          onCancel={handleCancelClose}
+        />
+      )}
     </div>
   );
 }

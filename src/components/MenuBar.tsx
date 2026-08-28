@@ -13,7 +13,9 @@ interface MenuBarProps {
   onSave: () => void;
   onSaveAs: () => void;
   onExportPage: () => void;
-  onClose: () => void;
+  // v2.3.0:拆为 onCloseTab(关当前 tab)和 onExitApp(退出整个应用),符合主流编辑器惯例
+  onCloseTab: () => void;
+  onExitApp: () => void;
   // 最近文件子菜单
   recent: string[];
   onOpenRecent: (path: string) => void;
@@ -35,7 +37,7 @@ interface MenuBarProps {
 
 export function MenuBar(props: MenuBarProps) {
   const {
-    isModified, onNew, onOpen, onSave, onSaveAs, onExportPage, onClose,
+    isModified, onNew, onOpen, onSave, onSaveAs, onExportPage, onCloseTab, onExitApp,
     recent, onOpenRecent, onClearRecent,
     mode, onModeChange,
     viewMode, onViewMode, theme, onThemeChange,
@@ -144,7 +146,8 @@ export function MenuBar(props: MenuBarProps) {
             <button onClick={() => { onSaveAs(); close(); }}>另存为... <span className="shortcut">Ctrl+Shift+S</span></button>
             <div className="menu-sep" />
             <button onClick={() => { onExportPage(); close(); }}>导出网页...</button>
-            <button onClick={() => { onClose(); close(); }}>关闭 <span className="shortcut">Ctrl+W</span></button>
+            <button onClick={() => { onCloseTab(); close(); }}>关闭标签 <span className="shortcut">Ctrl+W</span></button>
+            <button onClick={() => { onExitApp(); close(); }}>退出 <span className="shortcut">Ctrl+Q</span></button>
           </div>
         )}
       </div>

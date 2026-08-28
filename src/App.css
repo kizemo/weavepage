@@ -1421,3 +1421,122 @@ body {
   outline: 2px solid #1f3a68;
   outline-offset: 1px;
 }
+
+/* ===== Goal 1 — 可视块选择浮层 ===== */
+.selection-overlay {
+  box-sizing: border-box;
+}
+.selection-overlay--hover {
+  border: 1px dashed #94a3b8;
+}
+.selection-overlay--selected {
+  border: 2px solid #2563eb;
+}
+.selection-overlay__tag,
+.selection-overlay__badge {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+/* ===== Goal 2 — 容器样式组 ===== */
+.container-style-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+.container-style-group[data-disabled="true"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ===== Goal 3 — modal 通用 + 关闭弹窗 ===== */
+.modal-dialog {
+  background: var(--bg, white);
+  border-radius: 6px;
+  padding: 20px 24px;
+  min-width: 360px;
+  max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+:root[data-theme="dark"] .modal-dialog {
+  --bg: #2a2a2a;
+  --fg-muted: #bbb;
+  --border: #444;
+  --bg-hover: #353535;
+}
+.modal-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+.modal-dialog p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--fg-muted, #555);
+}
+.modal-dialog code {
+  background: var(--bg-hover, #f5f5f5);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 12px;
+}
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.modal-actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--border, #ccc);
+  background: var(--bg, white);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.modal-actions button:hover:not(:disabled) {
+  background: var(--bg-hover, #f5f5f5);
+}
+.modal-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.modal-actions button.modal-btn-primary {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+.modal-actions button.modal-btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+.dirty-tabs-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: 3px;
+}
+.dirty-tabs-list li {
+  border-bottom: 1px solid var(--border, #f0f0f0);
+}
+.dirty-tabs-list li:last-child {
+  border-bottom: none;
+}
+.dirty-tabs-list li label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.dirty-tabs-list li label:hover {
+  background: var(--bg-hover, #f9f9f9);
+}
+.dirty-tabs-list input[type="checkbox"] {
+  margin: 0;
+}

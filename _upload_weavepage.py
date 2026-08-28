@@ -25,12 +25,17 @@ import paramiko
 SFTP_CONFIG_PATH = r"E:\办公文件\L1网站\.vscode\sftp.json"
 LOCAL_BASE = r"E:\办公文件\L1网站\weavepage"
 REMOTE_BASE = "/var/www/wordpress/weavepage"
+VERSION_JSON = os.path.join(LOCAL_BASE, "version.json")
 
 # 待上传的 installer 文件名列表(完整双渠道)
-FILES_TO_UPLOAD = [
-    "WeavePage_2.2.0_x64-setup.exe",
-    "WeavePage_2.2.0_x64-update.exe",
-]
+# 从 version.json 读当前版本号自动拼接,避免 hardcode 漏升
+def _files_to_upload():
+    with open(VERSION_JSON, "r", encoding="utf-8") as f:
+        v = json.load(f)["version"]
+    return [
+        f"WeavePage_{v}_x64-setup.exe",
+        f"WeavePage_{v}_x64-update.exe",
+    ]
 
 
 def md5_file(path):
@@ -119,9 +124,10 @@ def main():
     print(f"  protocol={cfg['protocol']} remotePath={cfg['remotePath']}")
 
     # 预检:所有文件必须都存在(脚本不擅长只传一半)
-    print(f"\n=== [2/3] 本地预检 ({len(FILES_TO_UPLOAD)} 个文件) ===")
+    files_to_upload = _files_to_upload()
+    print(f"\n=== [2/3] 本地预检 ({len(files_to_upload)} 个文件) ===")
     pending = []
-    for filename in FILES_TO_UPLOAD:
+    for filename in files_to_upload:
         local_path = os.path.join(LOCAL_BASE, filename)
         if not os.path.exists(local_path):
             print(f"  [ERR] 本地文件不存在: {local_path}")
