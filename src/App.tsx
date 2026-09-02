@@ -1827,9 +1827,60 @@ const handleSpacingChange = useCallback(
   refs.current.filePath = filePath;
   refs.current.processImageBytes = processImageBytes;
 
-  // v0.2.0:refreshPreview / togglePreview / preview postMessage handler 已移除
-  // (preview 视图不再存在,编辑器视图 = 浏览器视图)
-
+  // v2.3.8:outer window dragover/drop 兜底(覆盖 Ribbon/Sidebar/StatusBar 等 outer 区域)
+  // 注意:iframe 内 drop 不会冒泡到 outer,所以 iframe 内由 blockSelectorScript 监听;
+  // 这里只接管 outer 区域的 drop。两层加在一起保证用户无论拖到哪都能用。
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        try { e.dataTransfer.dropEffect = "copy"; } catch (_) {}
+      }
+    };
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+      const file = Array.from(e.dataTransfer.files).find((f) =>
+        f.type.startsWith("image/")
+      );
+      if (!file) {
+        console.warn(
+          "[wp-outer-drop] 未找到 image 文件:",
+          Array.from(e.dataTransfer.files).map((f) => f.type)
+        );
+        return;
+      }
+      console.log("[wp-outer-drop] 收到图片:", file.name, file.type, file.size);
+      try {
+        let workingPath = refs.current.filePath;
+        if (!workingPath) {
+          const { save } = await import("@tauri-apps/plugin-dialog");
+          const selected = await save({
+            filters: [{ name: "HTML 文件", extensions: ["html"] }],
+          });
+          if (!selected) return;
+          workingPath = selected.endsWith(".html") ? selected : selected + ".html";
+          await doSave(workingPath);
+        }
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let ext = (file.name.split(".").pop() || "").toLowerCase();
+        if (ext.length === 0 || ext.length > 4 || !/^[a-z0-9]+$/.test(ext)) {
+          ext = "png";
+        }
+        await refs.current.processImageBytes(bytes, ext, workingPath);
+      } catch (err) {
+        console.error("[wp-outer-drop] 处理失败:", err);
+        window.alert("拖拽失败:" + String(err));
+      }
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // v0.1.13 第二十六轮:TocFloating.tsx 用 React onMouseEnter/Leave/onClick
 // 处理交互(hover 展开 / 鼠标移开收起 / click 跳转),不再需要 document click 委托
 // (之前 24 轮用的 click 委托假设 tocGen 输出 btn/panel id,但 React Portal 方案
