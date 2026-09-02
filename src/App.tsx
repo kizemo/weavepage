@@ -504,6 +504,30 @@ function App() {
         }
         return;
       }
+      // v2.3.8:iframe 内拖拽/粘贴图片 → outer 处理(走 SHA-256 去重 + sidecar 写入)
+      // msg.bytes 是 Uint8Array(经 postMessage transfer 传来,主线程持有所有权)
+      if (msg.type === "wp-insert-image-bytes") {
+        (async () => {
+          try {
+            let workingPath = refs.current.filePath;
+            if (!workingPath) {
+              const selected = await save({
+                filters: [{ name: "HTML 文件", extensions: ["html"] }],
+              });
+              if (!selected) return;
+              workingPath = selected.endsWith(".html") ? selected : selected + ".html";
+              await doSave(workingPath); // 内部会 setFilePath 并写空文件骨架
+            }
+            const bytes = new Uint8Array(msg.bytes as ArrayBuffer);
+            const ext = (msg.ext as string) || "png";
+            await refs.current.processImageBytes(bytes, ext, workingPath);
+          } catch (e) {
+            console.error("拖拽/粘贴图片失败:", e);
+            window.alert("拖拽/粘贴图片失败：" + String(e));
+          }
+        })();
+        return;
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -1367,6 +1391,74 @@ ${blockSelector}
   // ---- 图片插入(v2.4.0:sidecar img/ 文件夹 + 相对 URL)----
   // 把图片复制到 <html_dir>/img/img_<sha256前16>.<ext>,写入相对路径 <img src="img/...">
   // 优点:HTML 文件小、源码视图可读、跨平台、可发布、移动文件带 img/ 即可
+  // 内部工具:SHA-256 哈希 + sidecar 路径 + 写盘 + base64 + 插入
+  // 给 insertImage(按钮)和 wp-insert-image-bytes(drop/paste)共用。
+  // 注意:base64 编码目前跑在主线程(几百 KB JPEG 同步 btoa,卡几十~几百 ms)。
+  // TODO:base64 挪到 worker(避免大图卡 UI)— 见任务 #2
+  const processImageBytes = useCallback(
+    async (bytes: Uint8Array, ext: string, workingPath: string): Promise<void> => {
+      if (!iframeRef.current) return;
+      try {
+        // 1. SHA-256 哈希取前 16 字符(content-addressable,同名图片去重)
+        const hashBuf = await crypto.subtle.digest("SHA-256", bytes);
+        const hashHex = Array.from(new Uint8Array(hashBuf))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("")
+          .slice(0, 16);
+
+        // 2. 目标路径:<html_dir>/img/img_<hash>.<ext>
+        const mime =
+          ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+          : ext === "svg" ? "image/svg+xml"
+          : ext === "webp" ? "image/webp"
+          : ext === "gif" ? "image/gif"
+          : ext === "bmp" ? "image/bmp"
+          : "image/png";
+        const sep = workingPath.includes("\\") ? "\\" : "/";
+        const htmlDir = workingPath.replace(/[^/\\]+$/, "") || (sep === "\\" ? "C:\\" : "/");
+        const imgDir = htmlDir + "img";
+        const targetName = `img_${hashHex}.${ext}`;
+        const targetPath = imgDir + sep + targetName;
+        const relUrl = `img/${targetName}`;
+
+        // 3. 写入磁盘(目录不存在则建;目标已存在跳过 = 内容相同则去重)
+        if (!(await exists(targetPath))) {
+          if (!(await exists(imgDir))) {
+            await mkdir(imgDir, { recursive: true });
+          }
+          await writeFile(targetPath, bytes);
+        }
+
+        // v2.3.5:把图片读成 data URL 缓存,iframe 渲染时用 data URL 替代相对路径
+        // 原因:Tauri webview 禁止 iframe 加载 file:// URL(浏览器可以,Tauri 不行)
+        // 缓存:相对路径 → data URL;buildFullDoc(editable=true) 会读这个 map
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const dataUrl = `data:${mime};base64,${btoa(binary)}`;
+        imageDataUrlMapRef.current.set(relUrl, dataUrl);
+        // v2.3.6:反向映射 — input 事件把 data URL 还原为相对路径时反查
+        dataUrlToRelMapRef.current.set(dataUrl, relUrl);
+        setSrcDocVersion((v) => v + 1); // 触发 srcDoc 重算(用新 data URL)
+
+        // 4. 用相对 URL 插入 iframe(浏览器原生,无需 Tiptap schema)
+        const win = iframeRef.current.contentWindow;
+        const doc = iframeRef.current.contentDocument;
+        if (win && doc) {
+          win.focus();
+          doc.body.focus();
+          const imgTag = `<img src="${relUrl}" style="max-width:100%"><p><br></p>`;
+          doc.execCommand("insertHTML", false, imgTag);
+        }
+      } catch (e) {
+        console.error("处理图片失败:", e);
+        window.alert("处理图片失败：" + String(e));
+      }
+    },
+    []
+  );
+
   const insertImage = useCallback(async () => {
     if (!iframeRef.current) return;
     try {
@@ -1392,65 +1484,14 @@ ${blockSelector}
       const imgSrcPath = selected as string;
       const data = await readFile(imgSrcPath);
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-
-      // 2. SHA-256 哈希取前 16 字符(content-addressable,同名图片去重)
-      const hashBuf = await crypto.subtle.digest("SHA-256", bytes);
-      const hashHex = Array.from(new Uint8Array(hashBuf))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")
-        .slice(0, 16);
-
-      // 3. 目标路径:<html_dir>/img/img_<hash>.<ext>
       const ext = (imgSrcPath.split(".").pop() ?? "png").toLowerCase();
-      const mime =
-        ext === "jpg" || ext === "jpeg" ? "image/jpeg"
-        : ext === "svg" ? "image/svg+xml"
-        : ext === "webp" ? "image/webp"
-        : ext === "gif" ? "image/gif"
-        : ext === "bmp" ? "image/bmp"
-        : "image/png";
-      const sep = workingPath.includes("\\") ? "\\" : "/";
-      const htmlDir = workingPath.replace(/[^/\\]+$/, "") || (sep === "\\" ? "C:\\" : "/");
-      const imgDir = htmlDir + "img";
-      const targetName = `img_${hashHex}.${ext}`;
-      const targetPath = imgDir + sep + targetName;
-      const relUrl = `img/${targetName}`;
 
-      // 4. 写入磁盘(目录不存在则建;目标已存在跳过 = 内容相同则去重)
-      if (!(await exists(targetPath))) {
-        if (!(await exists(imgDir))) {
-          await mkdir(imgDir, { recursive: true });
-        }
-        await writeFile(targetPath, bytes);
-      }
-
-      // v2.3.5:把图片读成 data URL 缓存,iframe 渲染时用 data URL 替代相对路径
-      // 原因:Tauri webview 禁止 iframe 加载 file:// URL(浏览器可以,Tauri 不行)
-      // 缓存:相对路径 → data URL;buildFullDoc(editable=true) 会读这个 map
-      let binary = "";
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const dataUrl = `data:${mime};base64,${btoa(binary)}`;
-      imageDataUrlMapRef.current.set(relUrl, dataUrl);
-      // v2.3.6:反向映射 — input 事件把 data URL 还原为相对路径时反查
-      dataUrlToRelMapRef.current.set(dataUrl, relUrl);
-      setSrcDocVersion((v) => v + 1); // 触发 srcDoc 重算(用新 data URL)
-
-      // 5. 用相对 URL 插入 iframe(浏览器原生,无需 Tiptap schema)
-      const win = iframeRef.current.contentWindow;
-      const doc = iframeRef.current.contentDocument;
-      if (win && doc) {
-        win.focus();
-        doc.body.focus();
-        const imgTag = `<img src="${relUrl}" style="max-width:100%"><p><br></p>`;
-        doc.execCommand("insertHTML", false, imgTag);
-      }
+      await processImageBytes(bytes, ext, workingPath);
     } catch (e) {
       console.error("插入图片失败:", e);
       window.alert("插入图片失败：" + String(e));
     }
-  }, [filePath, doSave]);
+  }, [filePath, doSave, processImageBytes]);
 
   // ---- 链接(第三十轮:用 iframeExec createLink/unlink)----
   const setLink = useCallback(() => {
@@ -1775,12 +1816,16 @@ const handleSpacingChange = useCallback(
     new: () => {},
     close: () => {},
     togglePreview: () => {},
+    filePath: null as string | null,
+    processImageBytes: async (_b: Uint8Array, _e: string, _p: string) => {},
   });
   refs.current.save = saveFile;
   refs.current.saveAs = saveAsFile;
   refs.current.open = openFile;
   refs.current.new = newDoc;
   refs.current.close = () => closeDoc(activeId);
+  refs.current.filePath = filePath;
+  refs.current.processImageBytes = processImageBytes;
 
   // v0.2.0:refreshPreview / togglePreview / preview postMessage handler 已移除
   // (preview 视图不再存在,编辑器视图 = 浏览器视图)

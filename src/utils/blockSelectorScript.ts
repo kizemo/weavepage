@@ -437,6 +437,88 @@ export const BLOCK_SELECTOR_SCRIPT = `
       return;
     }
   });
+
+  // ---- v2.3.8:拖拽 / 粘贴图片 → outer 处理(走 SHA-256 去重 + sidecar 写入)----
+  // File 不能直接 postMessage 跨 window 传,所以 FileReader → ArrayBuffer → transferable
+  function postImageBytes(file, sourceExt) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var bytes = new Uint8Array(reader.result);
+      try {
+        window.parent.postMessage({
+          type: 'wp-insert-image-bytes',
+          bytes: bytes.buffer,
+          ext: sourceExt,
+          sourceName: file.name || ('pasted_' + Date.now() + '.' + sourceExt),
+        }, '*', [bytes.buffer]);
+      } catch (err) {
+        console.error('postImageBytes 失败:', err);
+      }
+    };
+    reader.onerror = function () {
+      console.error('FileReader 失败:', reader.error);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // MIME → 默认扩展名(粘贴场景 file.name 可能为空,用 mime 推断)
+  var MIME_TO_EXT = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/bmp': 'bmp',
+    'image/svg+xml': 'svg',
+  };
+
+  document.addEventListener('dragover', function (e) {
+    // 必须 preventDefault,否则 drop 不触发
+    if (!e.dataTransfer) return;
+    var types = e.dataTransfer.types;
+    if (!types) return;
+    for (var k = 0; k < types.length; k++) {
+      if (types[k] === 'Files') {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        return;
+      }
+    }
+  });
+  document.addEventListener('drop', function (e) {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    var file = null;
+    for (var i = 0; i < e.dataTransfer.files.length; i++) {
+      if (e.dataTransfer.files[i].type.indexOf('image/') === 0) {
+        file = e.dataTransfer.files[i];
+        break;
+      }
+    }
+    if (!file) return;
+    // 优先 file.name 取扩展名,fallback 用 mime
+    var ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (ext.length === 0 || ext.length > 4 || !/^[a-z0-9]+$/.test(ext)) {
+      ext = MIME_TO_EXT[file.type] || 'png';
+    }
+    postImageBytes(file, ext);
+  });
+
+  document.addEventListener('paste', function (e) {
+    if (!e.clipboardData) return;
+    var items = e.clipboardData.items;
+    if (!items || !items.length) return;
+    var file = null;
+    for (var j = 0; j < items.length; j++) {
+      if (items[j].kind === 'file' && items[j].type.indexOf('image/') === 0) {
+        file = items[j].getAsFile();
+        break;
+      }
+    }
+    if (!file) return;
+    e.preventDefault();
+    var ext2 = MIME_TO_EXT[file.type] || 'png';
+    postImageBytes(file, ext2);
+  });
 })();
 `;
 
