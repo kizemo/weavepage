@@ -11,6 +11,15 @@ export const BLOCK_SELECTOR_SCRIPT = `
   if (window.__wp_block_selector_installed) return;
   window.__wp_block_selector_installed = true;
 
+  // v2.3.4:防御 — 清理可能在历史编辑中累积到 body 里的 overlay div
+  //(v2.3.3 之前保存的 HTML body 里有 <div id="wp-hover-overlay"...> 等,
+  // 这些会被 input 事件捕获进 docHtml → 又一次污染)
+  // 必须在一切之前先清掉,确保后面 input 事件只捕获真正的用户内容
+  ['wp-hover-overlay', 'wp-selected-overlay'].forEach(function (id) {
+    var stale = document.getElementById(id);
+    if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+  });
+
   // ---- 工具:从 element 找 BlockIdentity ----
   function nthOfType(el) {
     if (!el || !el.parentElement) return 0;
@@ -30,12 +39,15 @@ export const BLOCK_SELECTOR_SCRIPT = `
     };
   }
   // 从 parentElement 链找 block ancestor
+  // v2.3.3:IMG 视为 block 终点 — 默认 display:inline,会被原有规则跳过,
+  // 导致点图片时选不中(img 跳出 selection 范围,选到上层 <p>)
   function blockFromPoint(x, y) {
     var el = document.elementFromPoint(x, y);
     if (!el) return null;
     var cur = el;
-    // 向上找到 block display 的元素
+    // 向上找到 block display 的元素(或 IMG)
     while (cur && cur !== document.body) {
+      if (cur.tagName === 'IMG') return cur;
       var display = window.getComputedStyle(cur).display;
       if (display && display !== 'inline' && display !== 'inline-block' &&
           display !== 'inline-flex' && display !== 'inline-table') {
@@ -56,6 +68,9 @@ export const BLOCK_SELECTOR_SCRIPT = `
   }
 
   // ---- 创建 / 复用 overlay 元素 ----
+  // v2.3.4:挂到 documentElement 而不是 body — 避免被 input 事件
+  //(body.addEventListener('input', () => setDocHtml(body.innerHTML)))
+  // 捕获到 docHtml,导致保存到磁盘的 HTML 里残留 overlay div
   function ensureOverlay(id, className, borderStyle) {
     var el = document.getElementById(id);
     if (el) return el;
@@ -63,7 +78,7 @@ export const BLOCK_SELECTOR_SCRIPT = `
     el.id = id;
     el.className = className;
     el.style.cssText = 'position:absolute;pointer-events:none;box-sizing:border-box;z-index:2147483600;' + borderStyle;
-    document.body.appendChild(el);
+    document.documentElement.appendChild(el);
     return el;
   }
   var hoverBadge = document.createElement('span');
@@ -76,6 +91,10 @@ export const BLOCK_SELECTOR_SCRIPT = `
   // ---- 状态 ----
   var hoveredBlock = null;  // HTMLElement 引用(iframe 内)
   var selectedBlock = null;
+  // v2.3.5:区分"刚点选块,准备删除"与"在块内编辑文字"
+  // 块被 click 选中 → blockSelectionActive = true;用户开始打字(input 事件)→ false
+  // Delete 只在 blockSelectionActive=true 时删块,否则让浏览器处理文本删字
+  var blockSelectionActive = false;
 
   function positionOverlay(overlay, target, badge, badgeSide) {
     if (!target) return;
@@ -129,6 +148,7 @@ export const BLOCK_SELECTOR_SCRIPT = `
     var block = blockFromPoint(e.clientX, e.clientY);
     if (!block || block === document.body) return;
     selectedBlock = block;
+    blockSelectionActive = true; // v2.3.5:标记"刚点选,准备删除"
     var ov = ensureOverlay('wp-selected-overlay', 'wp-overlay wp-selected',
       'border:2px solid #2563eb;');
     ov.style.display = '';
@@ -142,6 +162,11 @@ export const BLOCK_SELECTOR_SCRIPT = `
       }, '*');
     } catch (err) {}
   });
+
+  // v2.3.5:用户在块内打字 → 退出"选区"模式,Delete 不再删块
+  document.addEventListener('input', function () {
+    blockSelectionActive = false;
+  });
   // dblclick 不拦,文本编辑正常进行
 
   // ---- keydown ----
@@ -153,11 +178,94 @@ export const BLOCK_SELECTOR_SCRIPT = `
       try { window.parent.postMessage({ type: 'wp-block-selected', identity: null }, '*'); } catch (err) {}
       return;
     }
-    // Ctrl+Q 在 iframe 内也响应(否则 iframe focus 时外层 window.keydown 不触发)
-    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'q') {
+    // Ctrl+S / Ctrl+Shift+S 在 iframe 内响应 — 父 window.keydown 收不到 iframe 内事件,
+    // postMessage 走 outer App.tsx 的 onMessage handler → refs.current.save / saveAs
+    // Windows: Ctrl+S;Mac: Cmd+S(metaKey)。两者都接受。
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      try { window.parent.postMessage({ type: 'wp-save', shift: e.shiftKey }, '*'); } catch (err) {}
+      return;
+    }
+    // Ctrl+O / Cmd+O — 打开文件
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      try { window.parent.postMessage({ type: 'wp-open' }, '*'); } catch (err) {}
+      return;
+    }
+    // Ctrl+N / Cmd+N — 新建
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      e.preventDefault();
+      try { window.parent.postMessage({ type: 'wp-new' }, '*'); } catch (err) {}
+      return;
+    }
+    // Ctrl+W / Cmd+W — 关闭当前 tab
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+      e.preventDefault();
+      try { window.parent.postMessage({ type: 'wp-close' }, '*'); } catch (err) {}
+      return;
+    }
+    // Ctrl+Q / Cmd+Q — 退出应用
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'q') {
       e.preventDefault();
       try { window.parent.postMessage({ type: 'wp-exit-app' }, '*'); } catch (err) {}
       return;
+    }
+    // v2.3.5:Ctrl+Z / Cmd+Z 撤销(走 outer 切换历史栈)
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      try { window.parent.postMessage({ type: 'wp-undo' }, '*'); } catch (err) {}
+      return;
+    }
+    // v2.3.5:Ctrl+Y / Cmd+Y 或 Ctrl+Shift+Z / Cmd+Shift+Z 重做
+    if ((e.ctrlKey || e.metaKey) &&
+        ((!e.shiftKey && e.key.toLowerCase() === 'y') ||
+         (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+      e.preventDefault();
+      try { window.parent.postMessage({ type: 'wp-redo' }, '*'); } catch (err) {}
+      return;
+    }
+    // v2.3.5:Delete / Backspace 删除选中块 — 仅在 blockSelectionActive 时触发
+    // (避免在块内打字时误删整个块)
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlock && blockSelectionActive &&
+        selectedBlock !== document.body && selectedBlock !== document.documentElement) {
+      e.preventDefault();
+      try {
+        var removed = selectedBlock;
+        if (removed.parentNode) removed.parentNode.removeChild(removed);
+        selectedBlock = null;
+        blockSelectionActive = false;
+        try { window.parent.postMessage({ type: 'wp-block-selected', identity: null }, '*'); } catch (err2) {}
+        try {
+          window.parent.postMessage({
+            type: 'wp-doc-updated',
+            bodyHtml: document.body.innerHTML,
+          }, '*');
+        } catch (err3) {}
+      } catch (err) {}
+      return;
+    }
+    // v2.3.4 兼容逻辑:void 元素(IMG/BR/HR)无子节点,即使 blockSelectionActive=false 也允许删
+    // (浏览器对 void 的默认 delete 行为在某些 contenteditable 场景下不一致)
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlock &&
+        selectedBlock !== document.body && selectedBlock !== document.documentElement) {
+      var isVoid = /^(IMG|BR|HR|INPUT)$/.test(selectedBlock.tagName);
+      if (isVoid) {
+        e.preventDefault();
+        try {
+          var removed = selectedBlock;
+          if (removed.parentNode) removed.parentNode.removeChild(removed);
+          selectedBlock = null;
+          blockSelectionActive = false;
+          try { window.parent.postMessage({ type: 'wp-block-selected', identity: null }, '*'); } catch (err2) {}
+          try {
+            window.parent.postMessage({
+              type: 'wp-doc-updated',
+              bodyHtml: document.body.innerHTML,
+            }, '*');
+          } catch (err3) {}
+        } catch (err) {}
+        return;
+      }
     }
     if (selectedBlock && e.ctrlKey) {
       var target = null;
@@ -320,7 +428,7 @@ export const BLOCK_SELECTOR_SCRIPT = `
           ov2.id = 'wp-selected-overlay';
           ov2.className = 'wp-overlay wp-selected';
           ov2.style.cssText = 'position:absolute;pointer-events:none;box-sizing:border-box;z-index:2147483600;border:2px solid #2563eb;';
-          document.body.appendChild(ov2);
+          document.documentElement.appendChild(ov2);
         }
         ov2.style.display = '';
         positionOverlay(ov2, target, selBadge, 'right');

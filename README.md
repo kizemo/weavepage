@@ -84,7 +84,7 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ## 🚀 安装
 
-1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_2.3.0_x64-setup.exe`
+1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_2.3.7_x64-setup.exe`
 2. 双击安装（自动安装 WebView2 运行时，全程无需联网）
 3. 从开始菜单启动 **WeavePage**
 
@@ -94,13 +94,13 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ```
 # NSIS 安装包 (~254 MB)
-sha256: 21ed6e241267854f853f8e3355c2c56926064ee25b72e627ec9dc6a2796aadeb
+sha256: d7138c2a35c934fd5ea9321f996f40f5714435db78b539efa1e7233035996094
 
-# NSIS 应用内升级包 (~5.4 MB,仅供 WeavePage 应用内升级使用)
-sha256: 4cde9fc89a93b65fbf30caf87e7f24422f0a38aa63136dc1a40380319ece6378
+# NSIS 应用内升级包 (~5.5 MB,仅供 WeavePage 应用内升级使用)
+sha256: 0f9409a4c2f62028cef86978eeeb1fc718e16649e6717c48dc5a467aadc6e890
 ```
 
-Windows 验证：`certutil -hashfile WeavePage_2.3.0_x64-setup.exe SHA256`
+Windows 验证：`certutil -hashfile WeavePage_2.3.7_x64-setup.exe SHA256`
 
 ## 📖 使用指南
 

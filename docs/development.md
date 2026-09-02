@@ -28,7 +28,7 @@ pnpm tauri --version
 
 ## 3. 工作流:加一个新功能
 
-按 spec → plan → TDD → commit → build → 验收 → 发布 顺序:
+按 spec → plan → TDD → commit → build → 打 update.exe → 验收 → 发布 顺序:
 
 ```
 1. 写 docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
@@ -38,9 +38,10 @@ pnpm tauri --version
 3. 按 task 顺序执行,失败测试 → 实现 → 通过 → commit
    每个 commit 用 git -c user.name="aiec.fun" -c user.email="dev@aiec.fun" commit
 4. pnpm build 验证 0 TS 错
-5. pnpm release 验证 0 TS 错 + NSIS/MSI 产物
+5. ⛔ pnpm release:update 验证 0 TS 错 + release/WeavePage_X.Y.Z_x64-update.exe
+   (见 §5.1:测试前必打 update.exe,不要直接 pnpm release)
 6. 真机装机验收(这是 hard gate,不许走 form 跳过)
-7. 发布(见 §6)
+7. 用户验收通过后才走发布(见 §6):pnpm release + SFTP
 ```
 
 文档位置约定:
@@ -72,6 +73,40 @@ release 工具链(`_upload_weavepage.py`)还有第 5 个文件名 `LOCAL_FILE`�
 - 在 commit message 中说明越界原因
 
 ## 5. 测试
+
+### 5.1 ⛔ 测试前必做:在 `release/` 打包升级版 exe
+
+**任何真机测试/装机验收前,都必须在 `release/` 目录生成一份升级版 exe(`WeavePage_X.Y.Z_x64-update.exe`)**,这是 hard rule。
+
+原因:用户真机只装 upgrade(update 渠道,无 WebView2 离线包,~5.5MB,数秒装完);开发期一律用这个测。
+
+```bash
+# 0. bump 版本(2 文件 + 1 处)
+#    package.json → "version"
+#    src-tauri/tauri.conf.json → "version"
+#    (tauri.conf.update.json 是 partial-merge,**不要写 version,会被静默忽略**)
+
+# 1. 跑 tsc + vite build(确认 0 类型错)
+pnpm build
+
+# 2. 打 update 渠道(轻量,只覆盖已装版本)
+pnpm release:update
+# 产物:release/WeavePage_X.Y.Z_x64-update.exe
+# SHA256: certutil -hashfile release/WeavePage_X.Y.Z_x64-update.exe SHA256
+
+# 3. 装机验收(参见 §3 step 6 的真机 hard gate)
+```
+
+> **为什么不用 `pnpm release`(setup.exe 完整渠道)?**
+> setup.exe ~210MB(嵌 WebView2 离线安装包),更新一个补丁不必要;update.exe ~5.5MB,只覆盖已装用户。开发期一律 update。
+>
+> **为什么不用 `pnpm release:both`?**
+> full 渠道只用于首次安装 / 网站下载页;开发期不需要,反而拖慢 build。
+>
+> **何时才打 `pnpm release`?**
+> 见 §6 — 用户验收通过、**确认要发布**之后,才打 setup.exe + 上 SFTP。
+
+### 5.2 单元测试
 
 ```bash
 pnpm tsx src/utils/paragraphSpacing.test.ts   # 10 用例

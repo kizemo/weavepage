@@ -15,7 +15,7 @@ import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
 import { open, save, ask } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile, readFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile, readFile, writeFile, exists, mkdir } from "@tauri-apps/plugin-fs";
 import { getVersion } from "@tauri-apps/api/app";
 import { FontSize } from "./extensions/FontSize";
 import { GlobalAttrs, DivNode, SpanNode, DocToc } from "./extensions/HtmlCompat";
@@ -157,6 +157,9 @@ function App() {
   // 实现"切换视图不修改任何代码"。否则 formatHtml 即便 escAttr 修好也还会改空白/缩进。
   const [sourceTextSnapshot, setSourceTextSnapshot] = useState("");
   const [filePath, setFilePath] = useState<string | null>(null);
+  // v2.3.1:filePathRef 让 buildFullDoc 不需要把 filePath 放进 deps(callback 保持稳定)
+  const filePathRef = useRef<string | null>(null);
+  filePathRef.current = filePath;
   const [isModified, setIsModified] = useState(false);
   const [shell, setShell] = useState<DocShell | null>(null);
   const [blockPanelElement, setBlockPanelElement] = useState<HTMLElement | null>(null);
@@ -172,6 +175,23 @@ function App() {
   const [wordCount, setWordCount] = useState(0);
   // v0.1.13 第二十七轮:inline doc-toc 状态(从 doc content 推算,doc body 是否含 doc-toc atom)
   const [tocEnabled, setTocEnabled] = useState(false);
+  // v2.3.5:Ctrl+Z / Ctrl+Y 撤销/重做 — 记录 docHtml 历史栈
+  // historyRef.current: 快照数组;historyIndexRef.current: 当前位置
+  // 用 ref 而非 state 避免快照变化触发 React 重渲染(只在 undo/redo 时更新 srcDoc)
+  const historyRef = useRef<string[]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const [iframeReloadKey, setIframeReloadKey] = useState(0);
+  const skipNextHistoryRef = useRef<boolean>(false);
+  // v2.3.5:Tauri webview 禁止 iframe 加载 file:// URL → 编辑器无法显示本地图片
+  // 解决:插入图片时同时读出 data URL 缓存,buildFullDoc(editable) 用 data URL 替换 src
+  // 保存时仍写相对路径(clean HTML,源视图可读)
+  // map 键 = docHtml 里的相对路径(如 "img/abc123.jpg"),值 = data:image/...;base64,...
+  const imageDataUrlMapRef = useRef<Map<string, string>>(new Map());
+  // v2.3.6:反向映射 — input 事件把 data URL 还原为相对路径时反查
+  const dataUrlToRelMapRef = useRef<Map<string, string>>(new Map());
+  // srcDocVersion 触发 useMemo 重新计算(imageDataUrlMap 是 ref,需手动 bump)
+  const [srcDocVersion, setSrcDocVersion] = useState(0);
+
   const [showSidebar, setShowSidebar] = useState(true);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
   const [recentColors, setRecentColors] = useState<RecentColorsResult>({ text: [], highlight: [] });
@@ -184,6 +204,10 @@ function App() {
   // Tiptap state 仅作为 schema 容器供 TocFloating/tocGen 使用,save/preview/export 全部走 docHtml。
   // 必须在 useEditor 之前声明 — snapshotActive/applyDoc 都要读它。
   const [docHtml, setDocHtml] = useState<string>("<p></p>");
+  // v2.3.4:docHtmlRef 让 changeMode / doSave / exportPage 不用把 docHtml 放进 deps
+  // (避免每次输入都重新创建 callback — 输入事件高频触发,deps 抖动会引发连锁重渲染)
+  const docHtmlRef = useRef<string>("<p></p>");
+  docHtmlRef.current = docHtml;
   // v2.1.0:文档设计 — 纯内存 state,不持久化到 localStorage / DocState
   // 设计 CSS 注入 shell.head(由 buildFullDoc 自动包含在保存的 HTML)
   const [currentDesignId, setCurrentDesignId] = useState<string | null>(null);
@@ -347,6 +371,29 @@ function App() {
     setTocEnabled(hasDocTocInHtml(docHtml));
   }, [docHtml]);
 
+  // v2.3.5:Ctrl+Z / Ctrl+Y 撤销/重做 — docHtml 变化时压栈(500ms 防抖)
+  // 跳过由 undo/redo 触发的 setDocHtml(skipNextHistoryRef 阻止重入压栈)
+  // 历史栈上限 50,防止内存膨胀
+  useEffect(() => {
+    if (skipNextHistoryRef.current) {
+      skipNextHistoryRef.current = false;
+      historyIndexRef.current = historyRef.current.length - 1;
+      return;
+    }
+    const timer = setTimeout(() => {
+      const last = historyRef.current[historyRef.current.length - 1];
+      if (last !== docHtml) {
+        // 截断 redo 路径(在当前 index 之后的快照丢弃)
+        historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+        historyRef.current.push(docHtml);
+        if (historyRef.current.length > 50) historyRef.current.shift();
+        historyIndexRef.current = historyRef.current.length - 1;
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docHtml]);
+
   // Goal 1+2 — 监听 iframe.contentWindow postMessage
   // iframe 内 blockSelectorScript 通过 postMessage 通知 outer 当前选中的块 / doc 内容变化 / ⭐ 提升结果
   // Bug fix #6:wp-exit-app 转发 Ctrl+Q 到 handleExitAppRef(避免 TDZ + stale closure)
@@ -357,6 +404,25 @@ function App() {
       // iframe 内 Ctrl+Q 触发 → outer 走 handleExitApp(走 dirty 检测)
       if (msg.type === "wp-exit-app") {
         handleExitAppRef.current();
+        return;
+      }
+      // v2.3.1:iframe 内 Ctrl+S / Ctrl+O / Ctrl+N / Ctrl+W 通过 postMessage 转发
+      //(iframe 是独立 window,父 window.keydown 收不到 iframe 内事件)
+      if (msg.type === "wp-save") {
+        if (msg.shift) refs.current.saveAs();
+        else refs.current.save();
+        return;
+      }
+      if (msg.type === "wp-open") {
+        refs.current.open();
+        return;
+      }
+      if (msg.type === "wp-new") {
+        refs.current.new();
+        return;
+      }
+      if (msg.type === "wp-close") {
+        refs.current.close();
         return;
       }
       if (msg.type === "wp-block-selected") {
@@ -411,6 +477,31 @@ function App() {
         } catch {}
         setIsModified(true);
         updateActiveDoc({ shell: newShell, isModified: true });
+        return;
+      }
+      // v2.3.5:Ctrl+Z / Ctrl+Y — iframe 内拦截后 postMessage 上来,outer 切换历史栈
+      if (msg.type === "wp-undo") {
+        if (historyIndexRef.current > 0) {
+          historyIndexRef.current--;
+          const target = historyRef.current[historyIndexRef.current];
+          skipNextHistoryRef.current = true; // 阻止 setDocHtml 再次压栈
+          setDocHtml(target);
+          setIsModified(true);
+          updateActiveDoc({ body: target, isModified: true });
+          setIframeReloadKey((k) => k + 1); // 触发 srcDoc 重建 → iframe 重载显示历史内容
+        }
+        return;
+      }
+      if (msg.type === "wp-redo") {
+        if (historyIndexRef.current < historyRef.current.length - 1) {
+          historyIndexRef.current++;
+          const target = historyRef.current[historyIndexRef.current];
+          skipNextHistoryRef.current = true;
+          setDocHtml(target);
+          setIsModified(true);
+          updateActiveDoc({ body: target, isModified: true });
+          setIframeReloadKey((k) => k + 1);
+        }
         return;
       }
     };
@@ -795,37 +886,64 @@ ${bodyStyles}
   const buildFullDoc = useCallback(
     (bodyHtml: string, sh: DocShell | null, editable: boolean = false): string => {
       // Goal 1+2 — editable 模式注入 block selector script(iframe 内自渲染 + postMessage)
-      // 完全在 iframe 内执行,跨 frame 监听问题消除
+      // v2.3.1:必须放 <head>,不能放 <body> — body 内的 script 会被 input 事件
+      // → body.innerHTML 捕获,污染 docHtml,最终持久化到保存的 HTML
       const blockSelector = editable ? `<script>${blockSelectorScript()}</script>` : "";
+      // v2.3.5:editable 模式下,把 docHtml 里 <img src="img/..."> 替换成 data URL
+      // (Tauri webview 禁止 iframe 加载 file://,只能用 data: 渲染本地图片)
+      // 源文件保留相对路径(干净、可发布、源视图可读)
+      // 注意:正则只匹配相对路径,不会误改用户输入的 https:// 或 data: 链接
+      const finalBody = editable
+        ? bodyHtml.replace(
+            /<img\s+([^>]*?)src="(img\/[^"]+)"([^>]*?)>/gi,
+            (match, pre, src, post) => {
+              const dataUrl = imageDataUrlMapRef.current.get(src);
+              return dataUrl ? `<img ${pre}src="${dataUrl}"${post}>` : match;
+            }
+          )
+        : bodyHtml;
+      // v2.3.1:editable 模式注入 <base href> 让相对 URL 图片/CSS 能解析
+      // 用 filePathRef(在 useCallback 外层),不依赖 filePath closure → buildFullDoc 稳定
+      // 保存时(editable=false)绝不包含此 base,发布到 web 不受影响
+      const fp = filePathRef.current;
+      const editableBase = editable && fp
+        ? `<base href="file:///${fp.replace(/\\/g, "/").replace(/\/[^/]*$/, "/")}">`
+        : "";
       if (sh) {
         const base = sh.baseHref ? `<base href="${encodeURI(sh.baseHref)}">` : "";
+        // v2.3.4:剥除 sh.head 里残留的 <base> 标签 — 否则每个旧版本保存都会累积一个 base
+        // (head 来自 parseShell 的 doc.head.innerHTML,加载即带进来)
+        const headNoBase = sh.head.replace(/<base\s+href="[^"]*">\s*/gi, "").trim();
         // v0.1.13 第三十轮:editable 模式下 body 加 contenteditable=true,iframe 内可直接编辑
         const bodyEditable = editable ? ' contenteditable="true"' : "";
         return `${sh.doctype}
 <html>
-<head>${base}${sh.head}</head>
+<head>${editableBase}${base}${headNoBase}${blockSelector}</head>
 <body${sh.bodyAttrs}${bodyEditable}>
-${bodyHtml}
+${finalBody}
 ${sh.scripts}
 ${sh.styles}
-${blockSelector}
 </body>
 </html>`;
       }
-      const title = (filePath?.split("\\").pop() ?? "文档").replace(/\.html?$/, "");
+      const title = (fp?.split(/[\\/]/).pop() ?? "文档").replace(/\.html?$/, "");
       const bodyEditable = editable ? ' contenteditable="true"' : "";
       return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+${editableBase}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
 <style>body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.7;max-width:794px;margin:0 auto;padding:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px}blockquote{border-left:3px solid #ccc;margin:0.5em 0;padding-left:1em;color:#666}pre{background:#f0f0f0;padding:1em;border-radius:6px;overflow-x:auto}code{background:#f0f0f0;padding:0.2em 0.4em;border-radius:3px}img{max-width:100%;height:auto}</style>
+${blockSelector}
 </head>
-<body${bodyEditable}>${bodyHtml}${blockSelector}</body>
+<body${bodyEditable}>${finalBody}</body>
 </html>`;
     },
-    [filePath]
+    // 故意不放 filePath 到 deps(用 filePathRef 拿最新值),保持 callback 稳定
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
   );
 
   // ---- 按路径读文件并构造 DocState(openFile/openResource/openRecent 共用) ----
@@ -1004,7 +1122,8 @@ ${blockSelector}
       } else {
         // v0.1.13 第三十轮:用 docHtml 而非 editor.getHTML() —
         // editor 状态不会随 iframe 内 WYSIWYG 编辑更新;docHtml 才是 source of truth
-        content = buildFullDoc(docHtml, shell);
+        // v2.3.4:用 docHtmlRef.current 拿最新值(callback 不依赖 docHtml stale closure)
+        content = buildFullDoc(docHtmlRef.current, shell);
       }
       await writeTextFile(path, content);
       setFilePath(path);
@@ -1026,6 +1145,8 @@ ${blockSelector}
       }
     },
     [docs, activeId, editor, mode, sourceText, buildFullDoc, shell, updateActiveDoc, syncFromSource]
+    // 故意不放 docHtml 到 deps(用 docHtmlRef 拿最新值),保持 callback 稳定
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
   // Goal 3 — saveDocById:按 id 保存指定 doc(不依赖 activeId)
@@ -1234,18 +1355,33 @@ ${blockSelector}
       });
       if (!selected) return;
       const path = selected.endsWith(".html") ? selected : selected + ".html";
-      // v0.1.13 第三十轮:用 docHtml 保留 iframe WYSIWYG 内容
-      await writeTextFile(path, buildFullDoc(docHtml, shell));
+      // v2.3.4:用 docHtmlRef.current 拿最新值(避免 stale closure)
+      await writeTextFile(path, buildFullDoc(docHtmlRef.current, shell));
     } catch (e) {
       console.error("导出失败:", e);
       window.alert("导出失败：" + String(e));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, buildFullDoc, shell]);
 
-  // ---- 图片插入(第三十轮:用 iframeExec 插入 base64 img)----
+  // ---- 图片插入(v2.4.0:sidecar img/ 文件夹 + 相对 URL)----
+  // 把图片复制到 <html_dir>/img/img_<sha256前16>.<ext>,写入相对路径 <img src="img/...">
+  // 优点:HTML 文件小、源码视图可读、跨平台、可发布、移动文件带 img/ 即可
   const insertImage = useCallback(async () => {
     if (!iframeRef.current) return;
     try {
+      // 0. 必须先有 filePath:没保存过 HTML 没法确定 sidecar 目录。
+      // 简单做法:弹窗提示 + 自动触发 Save As;用户选完后用新路径作为 sidecar 根。
+      let workingPath = filePath;
+      if (!workingPath) {
+        const selected = await save({
+          filters: [{ name: "HTML 文件", extensions: ["html"] }],
+        });
+        if (!selected) return;
+        workingPath = selected.endsWith(".html") ? selected : selected + ".html";
+        await doSave(workingPath); // 内部会 setFilePath 并写空文件骨架
+      }
+      // 1. 选择图片
       const selected = await open({
         multiple: false,
         filters: [
@@ -1253,15 +1389,19 @@ ${blockSelector}
         ],
       });
       if (!selected) return;
-      const path = selected as string;
-      const data = await readFile(path);
+      const imgSrcPath = selected as string;
+      const data = await readFile(imgSrcPath);
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-      let binary = "";
-      const chunk = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunk) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-      }
-      const ext = (path.split(".").pop() ?? "png").toLowerCase();
+
+      // 2. SHA-256 哈希取前 16 字符(content-addressable,同名图片去重)
+      const hashBuf = await crypto.subtle.digest("SHA-256", bytes);
+      const hashHex = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .slice(0, 16);
+
+      // 3. 目标路径:<html_dir>/img/img_<hash>.<ext>
+      const ext = (imgSrcPath.split(".").pop() ?? "png").toLowerCase();
       const mime =
         ext === "jpg" || ext === "jpeg" ? "image/jpeg"
         : ext === "svg" ? "image/svg+xml"
@@ -1269,21 +1409,48 @@ ${blockSelector}
         : ext === "gif" ? "image/gif"
         : ext === "bmp" ? "image/bmp"
         : "image/png";
-      const base64 = btoa(binary);
-      // 用 iframeExec 插入 img 标签(浏览器原生,无需 Tiptap schema)
+      const sep = workingPath.includes("\\") ? "\\" : "/";
+      const htmlDir = workingPath.replace(/[^/\\]+$/, "") || (sep === "\\" ? "C:\\" : "/");
+      const imgDir = htmlDir + "img";
+      const targetName = `img_${hashHex}.${ext}`;
+      const targetPath = imgDir + sep + targetName;
+      const relUrl = `img/${targetName}`;
+
+      // 4. 写入磁盘(目录不存在则建;目标已存在跳过 = 内容相同则去重)
+      if (!(await exists(targetPath))) {
+        if (!(await exists(imgDir))) {
+          await mkdir(imgDir, { recursive: true });
+        }
+        await writeFile(targetPath, bytes);
+      }
+
+      // v2.3.5:把图片读成 data URL 缓存,iframe 渲染时用 data URL 替代相对路径
+      // 原因:Tauri webview 禁止 iframe 加载 file:// URL(浏览器可以,Tauri 不行)
+      // 缓存:相对路径 → data URL;buildFullDoc(editable=true) 会读这个 map
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const dataUrl = `data:${mime};base64,${btoa(binary)}`;
+      imageDataUrlMapRef.current.set(relUrl, dataUrl);
+      // v2.3.6:反向映射 — input 事件把 data URL 还原为相对路径时反查
+      dataUrlToRelMapRef.current.set(dataUrl, relUrl);
+      setSrcDocVersion((v) => v + 1); // 触发 srcDoc 重算(用新 data URL)
+
+      // 5. 用相对 URL 插入 iframe(浏览器原生,无需 Tiptap schema)
       const win = iframeRef.current.contentWindow;
       const doc = iframeRef.current.contentDocument;
       if (win && doc) {
         win.focus();
         doc.body.focus();
-        const imgTag = `<img src="data:${mime};base64,${base64}" style="max-width:100%"><p><br></p>`;
+        const imgTag = `<img src="${relUrl}" style="max-width:100%"><p><br></p>`;
         doc.execCommand("insertHTML", false, imgTag);
       }
     } catch (e) {
       console.error("插入图片失败:", e);
       window.alert("插入图片失败：" + String(e));
     }
-  }, []);
+  }, [filePath, doSave]);
 
   // ---- 链接(第三十轮:用 iframeExec createLink/unlink)----
   const setLink = useCallback(() => {
@@ -1349,13 +1516,16 @@ ${blockSelector}
         // v2.0.1:formatHtml 只调整空白(块级缩进/换行),不修改任何字符。
         // 配合 sourceTextSnapshot,未编辑切回时直接跳过 syncFromSource,实现
         // "切换视图不修改任何代码"。
-        const newSourceText = formatHtml(buildFullDoc(docHtml, shell));
+        // v2.3.4:用 docHtmlRef.current 拿最新值(每次按键都更新),不要用闭包 docHtml(stale)
+        const newSourceText = formatHtml(buildFullDoc(docHtmlRef.current, shell));
         setSourceText(newSourceText);
         setSourceTextSnapshot(newSourceText);
       }
       setMode(next);
     },
+    // 故意不放 docHtml 到 deps(用 docHtmlRef 拿最新值),保持 callback 稳定
     [editor, activeDoc, mode, sourceText, sourceTextSnapshot, syncFromSource, buildFullDoc, shell]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   );
 
   // ---- 右键：弹出 EditorContextMenu(块源码 / 设为默认样式) ----
@@ -1621,6 +1791,9 @@ const handleSpacingChange = useCallback(
 // 直接用 React 事件绑定更可靠)
 
   useEffect(() => {
+    // v2.3.1:焦点在 React 树(菜单/侧栏/状态栏)时,父 window 监听 catch Ctrl+S/O/N/W/Q
+    // 焦点在 iframe 编辑区时,Ctrl+S 等通过 iframe 内 blockSelectorScript → postMessage
+    // ('wp-save'/'wp-open'/'wp-new'/'wp-close'/'wp-exit-app')路由到 outer onMessage handler
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "s") {
@@ -1678,7 +1851,12 @@ const handleSpacingChange = useCallback(
   const editorSrcDoc = useMemo(
     () => buildFullDoc(docHtml, shell, /* editable */ true),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeDoc.id, shell]
+    // v2.3.4:加 mode 依赖 → 编辑→源码→编辑来回切时,iframe 重新挂载会用最新 docHtml
+    // v2.3.5:加 filePath 依赖 → Save As 之后 srcDoc 重新计算,带 <base href>,相对 URL 图片能解析
+    // v2.3.5:加 iframeReloadKey → Ctrl+Z/Y 后 srcDoc 重建,iframe 显示历史快照
+    // v2.3.5:加 srcDocVersion → 插入图片后 imageDataUrlMap 缓存更新,srcDoc 用新 data URL 渲染
+    // docHtml 故意不放 deps,避免每次按键 iframe 重载导致光标丢失
+    [activeDoc.id, shell, mode, filePath, iframeReloadKey, srcDocVersion]
   );
 
   // v0.2.0:basePreview / previewDoc 已移除(预览视图不存在,编辑器 = 浏览器)
@@ -1817,7 +1995,20 @@ const handleSpacingChange = useCallback(
                   }
                   // 标记 isModified + 同步字数 + docHtml(用户编辑反馈)
                   doc.body.addEventListener("input", () => {
-                    const html = doc.body.innerHTML;
+                    // v2.3.6:把 data URL 还原为相对路径,避免污染 docHtml
+                    // (iframe 内的 img 是 data URL 渲染,但 docHtml 必须是干净的相对路径:
+                    //  源视图可读 / 浏览器相对路径解析 / 不重复存储图片字节)
+                    let html = doc.body.innerHTML;
+                    if (dataUrlToRelMapRef.current.size > 0) {
+                      const dataUrlToRel = dataUrlToRelMapRef.current;
+                      html = html.replace(
+                        /<img\s+([^>]*?)src="(data:image\/[^"]+)"([^>]*?)>/gi,
+                        (match, pre, dataUrl, post) => {
+                          const relUrl = dataUrlToRel.get(dataUrl);
+                          return relUrl ? `<img ${pre}src="${relUrl}"${post}>` : match;
+                        }
+                      );
+                    }
                     setDocHtml(html);
                     setIsModified(true);
                     // Bug fix #1.6:同步 body 到 active doc,saveDocById 用 doc.body 写盘时拿到最新值
