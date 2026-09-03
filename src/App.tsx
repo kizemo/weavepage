@@ -1827,57 +1827,51 @@ const handleSpacingChange = useCallback(
   refs.current.filePath = filePath;
   refs.current.processImageBytes = processImageBytes;
 
-  // v2.3.8:outer window dragover/drop 兜底(覆盖 Ribbon/Sidebar/StatusBar 等 outer 区域)
-  // 注意:iframe 内 drop 不会冒泡到 outer,所以 iframe 内由 blockSelectorScript 监听;
-  // 这里只接管 outer 区域的 drop。两层加在一起保证用户无论拖到哪都能用。
+  // v2.3.9:Tauri 2.x 的 OS drag-drop 走 IPC 不走 DOM events
+  // (Tauri 拦截 webview 的 DOM dragover/drop,只通过 onDragDropEvent 暴露文件路径)
+  // 前两次修(dragover 无条件 preventDefault + dragDropEnabled:true)都是 no-op,因为
+  // DOM listener 根本收不到 events。
+  // 正确路径:用 getCurrentWebviewWindow().onDragDropEvent(callback),callback 拿到 payload.paths
+  //(绝对路径,已被 Rust 端验证有效),走 readFile + processImageBytes。
   useEffect(() => {
-    const onDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      if (e.dataTransfer) {
-        try { e.dataTransfer.dropEffect = "copy"; } catch (_) {}
-      }
-    };
-    const onDrop = async (e: DragEvent) => {
-      e.preventDefault();
-      if (!e.dataTransfer || !e.dataTransfer.files.length) return;
-      const file = Array.from(e.dataTransfer.files).find((f) =>
-        f.type.startsWith("image/")
-      );
-      if (!file) {
-        console.warn(
-          "[wp-outer-drop] 未找到 image 文件:",
-          Array.from(e.dataTransfer.files).map((f) => f.type)
-        );
-        return;
-      }
-      console.log("[wp-outer-drop] 收到图片:", file.name, file.type, file.size);
+    let unlisten: (() => void) | undefined;
+    (async () => {
       try {
-        let workingPath = refs.current.filePath;
-        if (!workingPath) {
-          const { save } = await import("@tauri-apps/plugin-dialog");
-          const selected = await save({
-            filters: [{ name: "HTML 文件", extensions: ["html"] }],
-          });
-          if (!selected) return;
-          workingPath = selected.endsWith(".html") ? selected : selected + ".html";
-          await doSave(workingPath);
-        }
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        let ext = (file.name.split(".").pop() || "").toLowerCase();
-        if (ext.length === 0 || ext.length > 4 || !/^[a-z0-9]+$/.test(ext)) {
-          ext = "png";
-        }
-        await refs.current.processImageBytes(bytes, ext, workingPath);
+        const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+        unlisten = await getCurrentWebviewWindow().onDragDropEvent(async (event) => {
+          if (event.payload.type !== "drop") return;
+          const paths = event.payload.paths;
+          if (!paths || !paths.length) return;
+          console.log("[wp-ipc-drop] 收到拖拽文件:", paths);
+          try {
+            let workingPath = refs.current.filePath;
+            if (!workingPath) {
+              const { save } = await import("@tauri-apps/plugin-dialog");
+              const selected = await save({
+                filters: [{ name: "HTML 文件", extensions: ["html"] }],
+              });
+              if (!selected) return;
+              workingPath = selected.endsWith(".html") ? selected : selected + ".html";
+              await doSave(workingPath);
+            }
+            for (const path of paths) {
+              if (!/\.(png|jpg|jpeg|gif|webp|bmp|svg)$/i.test(path)) continue;
+              const data = await readFile(path);
+              const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+              const ext = (path.split(".").pop() ?? "png").toLowerCase();
+              await refs.current.processImageBytes(bytes, ext, workingPath);
+            }
+          } catch (err) {
+            console.error("[wp-ipc-drop] 处理失败:", err);
+            window.alert("拖拽失败:" + String(err));
+          }
+        });
       } catch (err) {
-        console.error("[wp-outer-drop] 处理失败:", err);
-        window.alert("拖拽失败:" + String(err));
+        console.error("[wp-ipc-drop] 监听 onDragDropEvent 失败:", err);
       }
-    };
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("drop", onDrop);
+    })();
     return () => {
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("drop", onDrop);
+      if (unlisten) unlisten();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
