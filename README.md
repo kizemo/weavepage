@@ -50,7 +50,7 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 - **文字颜色 / 高亮**：弹出色板集成「更多颜色」（系统色盘）+「最近使用」色组（各 8 个，自动 LRU）
 - **打开最近**：文件菜单「打开最近 ▶」二级菜单，默认保存最近 10 个工作文档，子菜单尾部一键清除
 - **表格**：5×5 网格选择器一键插入，行列增删
-- **图片**：本地图片以 base64 嵌入，所见即所得
+- **图片**:**拖拽**本地图片到任意位置 / **Ctrl+V 粘贴**截图 → 自动落盘到 `<html_dir>/img/` 并以相对路径嵌入(SHA-256 去重,同名图不重复存储)
 
 ### 面向开发者的细节
 
@@ -84,7 +84,7 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 
 ## 🚀 安装
 
-1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_2.3.7_x64-setup.exe`
+1. 前往 [Releases](https://github.com/kizemo/weavepage/releases) 下载 `WeavePage_3.0.0_x64-setup.exe`
 2. 双击安装（自动安装 WebView2 运行时，全程无需联网）
 3. 从开始菜单启动 **WeavePage**
 
@@ -93,14 +93,14 @@ WeavePage（织页）是一款 **Windows 桌面网页编辑器**。传统网页�
 ### 🔐 校验
 
 ```
-# NSIS 安装包 (~254 MB)
-sha256: d7138c2a35c934fd5ea9321f996f40f5714435db78b539efa1e7233035996094
+# NSIS 安装包 (254 MB)
+sha256: f37155594a3bad985cc59d743c2e25385c904d21566c1d32aa206a2d790acfab
 
-# NSIS 应用内升级包 (~5.5 MB,仅供 WeavePage 应用内升级使用)
-sha256: 0f9409a4c2f62028cef86978eeeb1fc718e16649e6717c48dc5a467aadc6e890
+# NSIS 应用内升级包 (5.5 MB,仅供 WeavePage 应用内升级使用)
+sha256: 5efbd68a4f26fe17706d2d7e9cedef11802e6ad9f0cdd6f7310cb85598a853de
 ```
 
-Windows 验证：`certutil -hashfile WeavePage_2.3.7_x64-setup.exe SHA256`
+Windows 验证：`certutil -hashfile WeavePage_3.0.0_x64-setup.exe SHA256`
 
 ## 📖 使用指南
 
@@ -119,7 +119,7 @@ Windows 验证：`certutil -hashfile WeavePage_2.3.7_x64-setup.exe SHA256`
 | 编辑单个块源码 | 编辑区**右键任意块** → 右侧面板改 HTML → 应用 |
 | 编辑外联 CSS/JS | 左侧「外联资源」栏点击文件 → 新标签编辑 → Ctrl+S 写回 |
 | 多文件同时处理 | Ctrl+N 新建、Ctrl+O 打开、Ctrl+W 关闭标签、Ctrl+Q 退出应用 |
-| 插入表格/图片 | 「插入」选项卡：网格选择表格；图片按钮选本地图片 |
+| 插入表格/图片 | 「插入」选项卡：网格选择表格；图片按钮 / 拖入文件 / Ctrl+V 粘贴 |
 
 **全部快捷键**：`Ctrl+N/O/S/Shift+S/W/Q` 文件操作 · `Ctrl+Z/Y` 撤销重做 · `F5` 刷新预览 · `F9` 切换编辑/预览
 
@@ -162,6 +162,19 @@ pnpm release        # 打包安装程序到 release/ 目录
 - 演示文档见 [`assets/demo/demo.html`](assets/demo/demo.html)，下载后可直接用 WeavePage 打开体验
 
 ## 📋 变更日志
+
+### v3.0.0 — 2026-09-10
+- **新增 图片拖拽**:从资源管理器拖本地图片到 WeavePage 任意位置(编辑器 / Ribbon / Sidebar),自动落盘 + 插入文档。基于 Tauri 2.x `getCurrentWebviewWindow().onDragDropEvent` IPC(注意:DOM `dragover` / `drop` 在 Tauri 2.x 被完全拦截,改用 IPC 转发)
+- **新增 图片粘贴**:编辑器聚焦按 Ctrl+V,自动插入剪贴板图片(截图工具 / 浏览器复制)。SHA-256 去重,同内容图片不重复存储
+- **重构 `processImageBytes`**:按钮选文件 / 拖拽 / 粘贴三个入口共用一份 SHA-256 + sidecar 写入逻辑
+- **清理**:移除 v2.3.8/v2.3.9 调试用 `console.log` 与 no-op 的 iframe DOM 监听器
+
+### v2.3.7 — 2026-09-02
+- **修复 图片全流程**:sidecar `<html_dir>/img/` 目录 + iframe data URL 渲染 + input 事件反向剥 data URL,源视图与保存文件均为干净相对路径
+- **修复 视图同步**:`editorSrcDoc` useMemo deps 加 `mode` + `filePath` + `srcDocVersion`,切源码/编辑视图不丢编辑
+- **新增 撤销/重做**:`Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` 走 500ms 防抖历史栈(上限 50)
+- **修复 通用 Delete**:`blockSelectionActive` flag 区分选区态 / 编辑态,任意元素可删(void 元素 IMG/BR/HR/INPUT 特判)
+- **修复 base 累积剥除** + iframe overlay 挂 documentElement + blockSelectorScript 移 head
 
 ### v2.3.0 — 2026-08-28
 - **新增 可视块选择(Goal 1)**:编辑器内 hover 任意块元素显示浅虚线 + tag 提示;单击选中后蓝实线 + breadcrumb;Esc 脱选;Ctrl+↑/↓ 在父块 / 子块间 drill

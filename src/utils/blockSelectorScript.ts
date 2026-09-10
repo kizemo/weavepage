@@ -438,8 +438,10 @@ export const BLOCK_SELECTOR_SCRIPT = `
     }
   });
 
-  // ---- v2.3.8:拖拽 / 粘贴图片 → outer 处理(走 SHA-256 去重 + sidecar 写入)----
-  // File 不能直接 postMessage 跨 window 传,所以 FileReader → ArrayBuffer → transferable
+  // ---- v3.0.0:粘贴图片 → outer 处理(走 SHA-256 去重 + sidecar 写入)----
+  // 拖拽(v2.3.8 起先在 iframe DOM 监听,后改走 Tauri IPC)由 outer App.tsx 的
+  // getCurrentWebviewWindow().onDragDropEvent 接管,这里不再监听 drop。
+  // paste 是 contenteditable DOM 事件,Tauri 不拦截,继续走 iframe listener。
   function postImageBytes(file, sourceExt) {
     var reader = new FileReader();
     reader.onload = function () {
@@ -470,42 +472,6 @@ export const BLOCK_SELECTOR_SCRIPT = `
     'image/bmp': 'bmp',
     'image/svg+xml': 'svg',
   };
-
-  document.addEventListener('dragover', function (e) {
-    // 关键:无条件 preventDefault — 否则浏览器不允许 drop
-    // (iframe srcdoc + Tauri WebView2 在 dragover 早期阶段 types 可能还没准备好,
-    //  按类型判断可能错过 preventDefault 时机,导致 drop 永远不触发)
-    e.preventDefault();
-    if (e.dataTransfer) {
-      try { e.dataTransfer.dropEffect = 'copy'; } catch (_) {}
-    }
-  });
-  document.addEventListener('drop', function (e) {
-    e.preventDefault();
-    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) {
-      console.warn('[wp-drop] drop 触发但 files 为空,dataTransfer:', e.dataTransfer);
-      return;
-    }
-    var file = null;
-    for (var i = 0; i < e.dataTransfer.files.length; i++) {
-      if (e.dataTransfer.files[i].type.indexOf('image/') === 0) {
-        file = e.dataTransfer.files[i];
-        break;
-      }
-    }
-    if (!file) {
-      console.warn('[wp-drop] 未找到 image 文件,files:',
-        Array.prototype.map.call(e.dataTransfer.files, function (f) { return f.type; }));
-      return;
-    }
-    console.log('[wp-drop] 收到图片:', file.name, file.type, file.size);
-    // 优先 file.name 取扩展名,fallback 用 mime
-    var ext = (file.name.split('.').pop() || '').toLowerCase();
-    if (ext.length === 0 || ext.length > 4 || !/^[a-z0-9]+$/.test(ext)) {
-      ext = MIME_TO_EXT[file.type] || 'png';
-    }
-    postImageBytes(file, ext);
-  });
 
   document.addEventListener('paste', function (e) {
     if (!e.clipboardData) return;
